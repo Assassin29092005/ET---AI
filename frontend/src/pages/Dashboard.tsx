@@ -11,6 +11,7 @@ import {
   type SanctionAlertItem,
 } from "@/lib/api";
 import { connectFeedWebSocket } from "@/lib/ws";
+import { fmtIstTime } from "@/lib/fmt";
 import { useAppStore } from "@/lib/store";
 import {
   COMMODITY_LABEL,
@@ -60,14 +61,7 @@ function aggregateCorridor(scores: RiskScore[], corridor: Corridor) {
   return { score: top.score, tier: top.tier, drivers };
 }
 
-function fmtTimeUtc(iso: string | null): string {
-  if (!iso) return "--";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "--";
-  const hh = String(d.getUTCHours()).padStart(2, "0");
-  const mm = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${hh}:${mm} UTC`;
-}
+const fmtTimeUtc = fmtIstTime;
 
 function MetricCard({
   title,

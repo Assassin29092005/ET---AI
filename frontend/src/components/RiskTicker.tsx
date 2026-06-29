@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FeedItem } from "../lib/types";
-import { tierFromImportance } from "../lib/fmt";
+import { fmtIstTime, tierFromImportance } from "../lib/fmt";
 
 interface RiskTickerProps {
   items: FeedItem[];
@@ -20,18 +20,7 @@ const TIER_LABEL: Record<string, string> = {
   critical: "text-op-danger",
 };
 
-function fmtTimeUtc(iso: string | undefined): string {
-  if (!iso) return "--";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    const hh = String(d.getUTCHours()).padStart(2, "0");
-    const mm = String(d.getUTCMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-  } catch {
-    return iso;
-  }
-}
+const fmtTimeUtc = fmtIstTime;
 
 export function RiskTicker({ items }: RiskTickerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

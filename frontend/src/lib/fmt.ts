@@ -19,16 +19,54 @@ export function formatBrent(usd: number | null | undefined): string {
   return `$${usd.toFixed(2)}/bbl`;
 }
 
+export const IST_TZ = 'Asia/Kolkata';
+
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '--';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '--';
   return d.toLocaleString('en-IN', {
+    timeZone: IST_TZ,
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
+  }) + ' IST';
+}
+
+export function fmtIstTime(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--';
+  return d.toLocaleString('en-IN', {
+    timeZone: IST_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }) + ' IST';
+}
+
+export function fmtIstClock(d: Date): string {
+  return d.toLocaleString('en-IN', {
+    timeZone: IST_TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }) + ' IST';
+}
+
+export function fmtIstDate(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--';
+  return d.toLocaleString('en-IN', {
+    timeZone: IST_TZ,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
   });
 }
 

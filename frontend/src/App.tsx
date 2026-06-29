@@ -14,6 +14,7 @@ import ChatDrawer from "@/components/ChatDrawer";
 import CommodityTicker from "@/components/CommodityTicker";
 import { useAppStore } from "@/lib/store";
 import { getCommodities, getHealthz } from "@/lib/api";
+import { fmtIstClock } from "@/lib/fmt";
 import type { CommodityPrice } from "@/lib/types";
 
 interface NavGroup {
@@ -86,20 +87,17 @@ function Sidebar() {
   );
 }
 
-function useUtcClock() {
+function useIstClock() {
   const [now, setNow] = useState<Date>(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-  const hh = String(now.getUTCHours()).padStart(2, "0");
-  const mm = String(now.getUTCMinutes()).padStart(2, "0");
-  const ss = String(now.getUTCSeconds()).padStart(2, "0");
-  return `${hh}:${mm}:${ss} UTC`;
+  return fmtIstClock(now);
 }
 
 function Header() {
-  const clock = useUtcClock();
+  const clock = useIstClock();
   const [ok, setOk] = useState<boolean | null>(null);
   const [ticker, setTicker] = useState<CommodityPrice[]>([]);
 
