@@ -9,7 +9,16 @@ export type Commodity =
   | 'solar_pv'
   | 'uranium'
   | 'lpg'
-  | 'atf';
+  | 'atf'
+  | 'copper'
+  | 'graphite'
+  | 'manganese'
+  | 'polysilicon'
+  | 'silver'
+  | 'thermal_coal'
+  | 'pgm'
+  | 'rock_phosphate'
+  | 'potash';
 
 export type Corridor =
   | 'hormuz'
@@ -89,19 +98,40 @@ export interface ScenarioResult {
   generatedAt: string;
 }
 
+export type RouteStatus = 'open' | 'disrupted' | 'closed';
+
 export interface SourcingOption {
   rank: number;
   supplier: string;
   country: string;
   commodity: Commodity;
+  importSharePct: number;
   volumeMb: number;
   priceUsd: number;
   leadTimeDays: number;
-  routeCorridor: Corridor;
+  routeCorridor: string;
+  routeStatus: RouteStatus;
   routeRiskScore: number;
   sanctionsCheck: 'clear' | 'flag' | 'block';
   carbonIntensity: number;
   notes: string;
+}
+
+export interface DemandSubstitute {
+  name: string;
+  type: string;
+  maturity: 'available' | 'emerging' | 'nascent' | string;
+  displacementPct: number;
+  leadTimeMonths: number;
+  note: string;
+}
+
+export interface DemandSubstitutes {
+  commodity: Commodity;
+  primaryUse: string | null;
+  substitutes: DemandSubstitute[];
+  disclaimer?: string;
+  asOf?: string;
 }
 
 export interface SPRPlan {
@@ -191,6 +221,15 @@ export const COMMODITY_LABEL: Record<Commodity, string> = {
   uranium: 'Uranium',
   lpg: 'LPG',
   atf: 'ATF',
+  copper: 'Copper',
+  graphite: 'Graphite',
+  manganese: 'Manganese',
+  polysilicon: 'Polysilicon / Wafers',
+  silver: 'Silver',
+  thermal_coal: 'Thermal Coal',
+  pgm: 'Platinum Group Metals',
+  rock_phosphate: 'Rock Phosphate',
+  potash: 'Potash (MOP)',
 };
 
 export interface CorridorOverlay {

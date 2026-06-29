@@ -117,13 +117,15 @@ def _fixture_initial_items(limit: int = 5) -> list[dict[str, Any]]:
 
 
 def _event_to_feed_item(e: dict[str, Any], idx: int = 0) -> dict[str, Any]:
+    from app.api.routes import gdelt_context_url
+
     tone = float(e.get("tone", 0))
     return {
         "id": str(e.get("id", f"ws-{idx}")),
         "source": "GDELT",
         "headline": f"{e.get('actor1', 'Event')} - {str(e.get('event_code', ''))[:64]}",
         "summary": f"Tone {tone}; near {e.get('location', 'unknown')}",
-        "url": (e.get("urls") or [""])[0] if isinstance(e.get("urls"), list) else "",
+        "url": gdelt_context_url(e),
         "publishedAt": e.get("timestamp", datetime.now(timezone.utc).isoformat()),
         "tags": [str(e.get("theme", ""))],
         "corridor": None,

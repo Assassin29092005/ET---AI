@@ -6,10 +6,14 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts';
-import { getSourcing } from '@/lib/api';
+import { getSourcing, getSourcingSubstitutes } from '@/lib/api';
 import {
   COMMODITY_LABEL,
+  CORRIDOR_LABEL,
   type Commodity,
+  type Corridor,
+  type DemandSubstitutes,
+  type RouteStatus,
   type SourcingOption,
 } from '@/lib/types';
 import { fmtNumber } from '@/lib/fmt';
@@ -25,6 +29,25 @@ const COMMODITIES: Commodity[] = [
   'rare_earths',
   'solar_pv',
   'uranium',
+  'copper',
+  'graphite',
+  'manganese',
+  'polysilicon',
+  'silver',
+  'thermal_coal',
+  'pgm',
+  'rock_phosphate',
+  'potash',
+];
+
+// Chokepoints the user can simulate a full cutoff on.
+const DISRUPTABLE_CORRIDORS: Corridor[] = [
+  'hormuz',
+  'bab_el_mandeb',
+  'malacca',
+  'south_china_sea',
+  'suez',
+  'cape_of_good_hope',
 ];
 
 const PIE_COLORS = [
@@ -38,13 +61,31 @@ const PIE_COLORS = [
   '#84cc16',
   '#f43f5e',
   '#94a3b8',
+  '#22d3ee',
+  '#e879f9',
+  '#facc15',
+  '#4ade80',
 ];
 
 const DEFAULT_VOLUME = 100;
 
+const STATUS_PILL: Record<RouteStatus, string> = {
+  open: 'border-emerald-500/40 text-emerald-300',
+  disrupted: 'border-amber-500/40 text-amber-300',
+  closed: 'border-red-500/50 text-red-300',
+};
+
+const MATURITY_PILL: Record<string, string> = {
+  available: 'border-emerald-500/40 text-emerald-300',
+  emerging: 'border-amber-500/40 text-amber-300',
+  nascent: 'border-slate-500/40 text-slate-300',
+};
+
 export default function Sourcing() {
   const [commodity, setCommodity] = useState<Commodity>('crude_oil');
+  const [disrupted, setDisrupted] = useState<Corridor | ''>('');
   const [options, setOptions] = useState<SourcingOption[]>([]);
+  const [substitutes, setSubstitutes] = useState<DemandSubstitutes | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -53,7 +94,7 @@ export default function Sourcing() {
     setLoading(true);
     async function load() {
       try {
-        const data = await getSourcing(commodity, DEFAULT_VOLUME);
+        const data = await getSourcing(commodity, DEFAULT_VOLUME, disrupted || null);
         if (cancelled) return;
         setOptions(data);
         setError(null);
@@ -68,19 +109,43 @@ export default function Sourcing() {
     return () => {
       cancelled = true;
     };
+  }, [commodity, disrupted]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const data = await getSourcingSubstitutes(commodity);
+        if (!cancelled) setSubstitutes(data);
+      } catch {
+        if (!cancelled) setSubstitutes(null);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [commodity]);
 
   const shareByCountry = useMemo(() => {
     const map = new Map<string, number>();
-    options.forEach((o) => map.set(o.country, (map.get(o.country) ?? 0) + o.volumeMb));
+    options
+      .filter((o) => o.volumeMb > 0)
+      .forEach((o) => map.set(o.country, (map.get(o.country) ?? 0) + o.volumeMb));
     return Array.from(map.entries()).map(([country, volume]) => ({ country, volume }));
   }, [options]);
 
+  const closedCount = useMemo(
+    () => options.filter((o) => o.routeStatus === 'closed').length,
+    [options],
+  );
+
   const recommendation = useMemo(() => {
-    if (options.length === 0) return null;
-    const top = options[0];
-    const cleared = options.filter((o) => o.sanctionsCheck === 'clear').length;
-    return `Top alternative: ${top.supplier} in ${top.country}. ${cleared} of ${options.length} options pass sanctions check. Composite risk ${top.routeRiskScore.toFixed(0)} on the ${top.routeCorridor.replace(/_/g, ' ')} corridor.`;
+    const openOptions = options.filter((o) => o.routeStatus !== 'closed');
+    if (openOptions.length === 0) return null;
+    const top = openOptions[0];
+    const cleared = openOptions.filter((o) => o.sanctionsCheck === 'clear').length;
+    return `Top open source: ${top.country} (${top.importSharePct.toFixed(0)}% of current imports). ${cleared} of ${openOptions.length} open options pass sanctions check. Composite risk ${top.routeRiskScore.toFixed(0)} via ${top.routeCorridor}.`;
   }, [options]);
 
   return (
@@ -90,24 +155,52 @@ export default function Sourcing() {
           <p className="text-[11px] uppercase tracking-[0.2em] text-indigo-400">Procurement</p>
           <h1 className="mt-1 text-xl font-semibold text-slate-100">Sourcing intelligence</h1>
           <p className="mt-1 text-xs text-slate-400">
-            Ranks alternative suppliers by current risk + historical share + lead-time. Does NOT validate refinery / smelter chemistry.
+            Ranks suppliers by live corridor risk + import share + lead-time, and surfaces
+            demand-side substitutes. Does NOT validate refinery / smelter chemistry.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500">Commodity</label>
-          <select
-            value={commodity}
-            onChange={(e) => setCommodity(e.target.value as Commodity)}
-            className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
-          >
-            {COMMODITIES.map((c) => (
-              <option key={c} value={c}>
-                {COMMODITY_LABEL[c]}
-              </option>
-            ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500">Commodity</label>
+            <select
+              value={commodity}
+              onChange={(e) => setCommodity(e.target.value as Commodity)}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
+            >
+              {COMMODITIES.map((c) => (
+                <option key={c} value={c}>
+                  {COMMODITY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500">
+              Simulate cutoff
+            </label>
+            <select
+              value={disrupted}
+              onChange={(e) => setDisrupted(e.target.value as Corridor | '')}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-200 focus:border-red-500 focus:outline-none"
+            >
+              <option value="">None (live risk)</option>
+              {DISRUPTABLE_CORRIDORS.map((c) => (
+                <option key={c} value={c}>
+                  {CORRIDOR_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </header>
+
+      {disrupted && (
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          Simulating <span className="font-semibold">{CORRIDOR_LABEL[disrupted]}</span> full cutoff —{' '}
+          {closedCount} route{closedCount === 1 ? '' : 's'} closed; recommended volume reallocated to
+          open suppliers. Risk for that corridor is forced to 100.
+        </div>
+      )}
 
       {recommendation && (
         <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 text-sm text-indigo-200">
@@ -182,56 +275,138 @@ export default function Sourcing() {
                 <tr>
                   <th className="px-4 py-2 text-left">#</th>
                   <th className="px-4 py-2 text-left">Supplier / country</th>
+                  <th className="px-4 py-2 text-right">Import share</th>
                   <th className="px-4 py-2 text-right">Vol MB</th>
                   <th className="px-4 py-2 text-right">Price USD</th>
                   <th className="px-4 py-2 text-right">Lead time</th>
-                  <th className="px-4 py-2 text-left">Corridor</th>
+                  <th className="px-4 py-2 text-left">Corridor / status</th>
                   <th className="px-4 py-2 text-right">Risk</th>
                   <th className="px-4 py-2 text-left">Sanctions</th>
                 </tr>
               </thead>
               <tbody>
-                {options.map((o) => (
-                  <tr key={`${o.supplier}-${o.country}-${o.rank}`} className="border-t border-slate-800">
-                    <td className="px-4 py-2 text-slate-300 tabular-nums">{o.rank}</td>
-                    <td className="px-4 py-2">
-                      <div className="text-slate-200">{o.supplier}</div>
-                      <div className="text-[11px] text-slate-500">{o.country}</div>
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-slate-300">
-                      {fmtNumber(o.volumeMb, 1)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-slate-300">
-                      ${o.priceUsd.toFixed(2)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-slate-300">{o.leadTimeDays} d</td>
-                    <td className="px-4 py-2 text-xs text-slate-400">{o.routeCorridor.replace(/_/g, ' ')}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-slate-300">
-                      {o.routeRiskScore.toFixed(0)}
-                    </td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={
-                          o.sanctionsCheck === 'clear'
-                            ? 'text-emerald-300'
-                            : o.sanctionsCheck === 'flag'
-                              ? 'text-amber-300'
-                              : 'text-red-300'
-                        }
-                      >
-                        {o.sanctionsCheck}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {options.map((o) => {
+                  const isClosed = o.routeStatus === 'closed';
+                  return (
+                    <tr
+                      key={`${o.supplier}-${o.country}-${o.rank}`}
+                      className={`border-t border-slate-800 ${isClosed ? 'opacity-50' : ''}`}
+                    >
+                      <td className="px-4 py-2 text-slate-300 tabular-nums">{o.rank}</td>
+                      <td className="px-4 py-2">
+                        <div className={`text-slate-200 ${isClosed ? 'line-through' : ''}`}>
+                          {o.supplier}
+                        </div>
+                        <div className="text-[11px] text-slate-500">{o.country}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-200">
+                        {o.importSharePct.toFixed(1)}%
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">
+                        {o.volumeMb > 0 ? fmtNumber(o.volumeMb, 1) : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">
+                        ${o.priceUsd.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">{o.leadTimeDays} d</td>
+                      <td className="px-4 py-2 text-xs text-slate-400">
+                        <div>{o.routeCorridor}</div>
+                        {o.routeStatus !== 'open' && (
+                          <span
+                            className={`mt-0.5 inline-block rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${STATUS_PILL[o.routeStatus]}`}
+                          >
+                            {o.routeStatus}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">
+                        {o.routeRiskScore.toFixed(0)}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={
+                            o.sanctionsCheck === 'clear'
+                              ? 'text-emerald-300'
+                              : o.sanctionsCheck === 'flag'
+                                ? 'text-amber-300'
+                                : 'text-red-300'
+                          }
+                        >
+                          {o.sanctionsCheck}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
           <div className="border-t border-slate-800 px-5 py-2 text-[11px] text-slate-500">
-            Scoping note: ranks suppliers without crude grade / coal washability / lithium chemistry validation.
+            Risk is the live corridor composite (matches the dashboard); a simulated cutoff forces
+            the corridor to 100 and reallocates volume to open routes.
           </div>
         </section>
       </div>
+
+      <section className="rounded-lg border border-slate-800 bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-5 py-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-100">
+              Demand-side substitution · alternate use cases
+            </h3>
+            {substitutes?.primaryUse && (
+              <p className="mt-0.5 text-xs text-slate-400">
+                Primary end-use: {substitutes.primaryUse}
+              </p>
+            )}
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+            reduces / replaces demand
+          </span>
+        </div>
+        {!substitutes || substitutes.substitutes.length === 0 ? (
+          <div className="px-5 py-6 text-sm text-slate-500">
+            No demand-side substitutes modelled for {COMMODITY_LABEL[commodity]} yet.
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+              {substitutes.substitutes.map((sub) => (
+                <div
+                  key={sub.name}
+                  className="flex flex-col gap-2 rounded-md border border-slate-800 bg-slate-950/40 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-medium text-slate-100">{sub.name}</span>
+                    <span
+                      className={`shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                        MATURITY_PILL[sub.maturity] ?? 'border-slate-600 text-slate-400'
+                      }`}
+                    >
+                      {sub.maturity}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <span className="font-mono uppercase tracking-wider text-slate-500">
+                      {sub.type}
+                    </span>
+                    <span className="tabular-nums text-emerald-300">
+                      ~{sub.displacementPct}% displaceable
+                    </span>
+                    <span className="tabular-nums text-slate-500">{sub.leadTimeMonths} mo</span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-slate-400">{sub.note}</p>
+                </div>
+              ))}
+            </div>
+            {substitutes.disclaimer && (
+              <div className="border-t border-slate-800 px-5 py-2 text-[11px] text-slate-500">
+                {substitutes.disclaimer}
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }

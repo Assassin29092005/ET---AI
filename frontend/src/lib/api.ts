@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import {
   CommodityPrice,
+  DemandSubstitutes,
   ExecutiveBrief,
   FeedItem,
   RiskScore,
@@ -135,11 +136,26 @@ export function getTwinState(): Promise<TwinState> {
   return request<TwinState>({ method: 'GET', url: '/digital-twin/state' });
 }
 
-export function getSourcing(commodity: Commodity, volumeMb: number): Promise<SourcingOption[]> {
+export function getSourcing(
+  commodity: Commodity,
+  volumeMb: number,
+  disruptedCorridor?: Corridor | null,
+  severity = 1.0,
+): Promise<SourcingOption[]> {
   return request<SourcingOption[]>({
     method: 'GET',
     url: `/sourcing/${encodeURIComponent(commodity)}`,
-    params: { volumeMb },
+    params: {
+      volumeMb,
+      ...(disruptedCorridor ? { disruptedCorridor, severity } : {}),
+    },
+  });
+}
+
+export function getSourcingSubstitutes(commodity: Commodity): Promise<DemandSubstitutes> {
+  return request<DemandSubstitutes>({
+    method: 'GET',
+    url: `/sourcing/${encodeURIComponent(commodity)}/substitutes`,
   });
 }
 

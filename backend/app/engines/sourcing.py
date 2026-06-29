@@ -31,6 +31,15 @@ class Commodity(str, Enum):
     RARE_EARTHS = "rare_earths"
     SOLAR_PV = "solar_pv"
     URANIUM = "uranium"
+    COPPER = "copper"
+    GRAPHITE = "graphite"
+    MANGANESE = "manganese"
+    POLYSILICON = "polysilicon"
+    SILVER = "silver"
+    THERMAL_COAL = "thermal_coal"
+    PGM = "pgm"
+    ROCK_PHOSPHATE = "rock_phosphate"
+    POTASH = "potash"
 
 
 @dataclass
@@ -77,6 +86,22 @@ _COUNTRY_TO_CORRIDOR: Dict[str, str] = {
     "France": "Suez or Cape",
     "Vietnam": "South China Sea",
     "Malaysia": "Strait of Malacca",
+    "Peru": "Cape of Good Hope",
+    "Madagascar": "Cape of Good Hope",
+    "Tanzania": "Cape of Good Hope",
+    "South Africa": "Cape of Good Hope",
+    "Gabon": "Cape of Good Hope",
+    "Ghana": "Cape of Good Hope",
+    "Zimbabwe": "Cape of Good Hope",
+    "Togo": "Cape of Good Hope",
+    "Canada": "Cape of Good Hope",
+    "Morocco": "Suez or Cape",
+    "UK": "Suez or Cape",
+    "Switzerland": "Suez or Cape",
+    "Jordan": "Bab el-Mandeb",
+    "Egypt": "Bab el-Mandeb",
+    "Israel": "Bab el-Mandeb",
+    "Belarus": "Land",
 }
 
 
@@ -148,6 +173,74 @@ _HISTORICAL_SHARES: Dict[Commodity, Dict[str, float]] = {
         "Russia": 0.20,
         "France": 0.15,
         "Australia": 0.10,
+    },
+    Commodity.COPPER: {
+        "Chile": 0.28,
+        "Peru": 0.20,
+        "Indonesia": 0.14,
+        "Australia": 0.12,
+        "Brazil": 0.08,
+        "USA": 0.05,
+    },
+    Commodity.GRAPHITE: {
+        "China": 0.50,
+        "Madagascar": 0.16,
+        "Mozambique": 0.12,
+        "Tanzania": 0.08,
+        "Vietnam": 0.06,
+        "USA": 0.03,
+    },
+    Commodity.MANGANESE: {
+        "South Africa": 0.42,
+        "Gabon": 0.20,
+        "Australia": 0.15,
+        "Ghana": 0.08,
+        "Brazil": 0.06,
+        "Indonesia": 0.04,
+    },
+    Commodity.POLYSILICON: {
+        "China": 0.85,
+        "Malaysia": 0.05,
+        "Germany": 0.04,
+        "USA": 0.03,
+        "Vietnam": 0.02,
+    },
+    Commodity.SILVER: {
+        "UAE": 0.30,
+        "UK": 0.18,
+        "China": 0.14,
+        "Switzerland": 0.12,
+        "Australia": 0.10,
+        "Peru": 0.06,
+    },
+    Commodity.THERMAL_COAL: {
+        "Indonesia": 0.52,
+        "Australia": 0.22,
+        "South Africa": 0.12,
+        "Russia": 0.08,
+        "USA": 0.04,
+    },
+    Commodity.PGM: {
+        "South Africa": 0.68,
+        "Russia": 0.16,
+        "Zimbabwe": 0.08,
+        "USA": 0.04,
+    },
+    Commodity.ROCK_PHOSPHATE: {
+        "Morocco": 0.40,
+        "Jordan": 0.18,
+        "Saudi Arabia": 0.14,
+        "Egypt": 0.10,
+        "Togo": 0.08,
+        "UAE": 0.05,
+    },
+    Commodity.POTASH: {
+        "Canada": 0.34,
+        "Russia": 0.20,
+        "Belarus": 0.18,
+        "Israel": 0.12,
+        "Jordan": 0.10,
+        "Germany": 0.04,
     },
 }
 
@@ -229,6 +322,7 @@ def _rationale_text(
 async def rank_alternatives(
     commodity: Commodity,
     disrupted_source: Optional[str] = None,
+    risk_overrides: Optional[Dict[str, float]] = None,
 ) -> List[SourcingOption]:
     """Rank alternative source countries for a commodity.
 
@@ -238,6 +332,12 @@ async def rank_alternatives(
 
     The disrupted source, if provided, is excluded from the result so the
     caller sees only substitutes.
+
+    ``risk_overrides`` maps a corridor label (e.g. "Strait of Hormuz") to a
+    current risk in [0, 1] and supersedes the static default table. The API
+    layer populates it from the live corridor scores and from any active
+    disruption (a full chokepoint cutoff drives the affected corridor to ~1.0),
+    so the ranking re-orders as risk moves rather than staying fixed.
     """
     shares = _HISTORICAL_SHARES.get(commodity, {})
     if not shares:
@@ -249,7 +349,10 @@ async def rank_alternatives(
             continue
 
         corridor = _COUNTRY_TO_CORRIDOR.get(country, "Cape of Good Hope")
-        risk = country_risk_by_corridor(country)
+        if risk_overrides and corridor in risk_overrides:
+            risk = max(0.0, min(1.0, float(risk_overrides[corridor])))
+        else:
+            risk = country_risk_by_corridor(country)
         lead_time = _LEAD_TIME_SCORE.get(corridor, 0.5)
 
         score = 0.5 * (1.0 - risk) + 0.3 * share + 0.2 * lead_time
@@ -290,4 +393,4 @@ async def rank_alternatives(
         )
 
     options.sort(key=lambda o: o.composite_score, reverse=True)
-    return options[:5]
+    return options[:8]

@@ -17,6 +17,15 @@ const COMMODITY_TONE: Record<Commodity, string> = {
   uranium: 'border-lime-400/40 text-lime-300',
   lpg: 'border-orange-400/40 text-orange-300',
   atf: 'border-cyan-400/40 text-cyan-300',
+  copper: 'border-orange-400/40 text-orange-300',
+  graphite: 'border-op-ink3 text-op-ink2',
+  manganese: 'border-rose-400/40 text-rose-300',
+  polysilicon: 'border-amber-400/40 text-amber-300',
+  silver: 'border-slate-300/40 text-slate-200',
+  thermal_coal: 'border-op-ink3 text-op-ink2',
+  pgm: 'border-indigo-300/40 text-indigo-200',
+  rock_phosphate: 'border-emerald-400/40 text-emerald-300',
+  potash: 'border-red-400/40 text-red-300',
 };
 
 export function CommodityBadge({ commodity, size = 'sm' }: CommodityBadgeProps) {
