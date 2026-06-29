@@ -12,9 +12,11 @@ Swagger docs: http://localhost:8000/docs
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -40,6 +42,15 @@ CORRIDOR_FOR_COMMODITY: dict[str, str] = {
     "nickel": "malacca",
     "solar_pv": "south_china_sea",
     "uranium": "malacca",
+    "copper": "cape_of_good_hope",
+    "graphite": "south_china_sea",
+    "manganese": "cape_of_good_hope",
+    "polysilicon": "south_china_sea",
+    "silver": "cape_of_good_hope",
+    "thermal_coal": "malacca",
+    "pgm": "cape_of_good_hope",
+    "rock_phosphate": "suez",
+    "potash": "suez",
 }
 
 BASE_BRENT = 82.0
@@ -58,6 +69,15 @@ ALL_COMMODITIES: list[str] = [
     "uranium",
     "lpg",
     "atf",
+    "copper",
+    "graphite",
+    "manganese",
+    "polysilicon",
+    "silver",
+    "thermal_coal",
+    "pgm",
+    "rock_phosphate",
+    "potash",
 ]
 
 CORRIDOR_LABEL: dict[str, str] = {
@@ -67,6 +87,18 @@ CORRIDOR_LABEL: dict[str, str] = {
     "south_china_sea": "South China Sea",
     "cape_of_good_hope": "Cape of Good Hope",
     "suez": "Suez Canal",
+}
+
+# Maps the score/twin corridor keys to the corridor labels the sourcing engine
+# uses on each supplier. Lets us drive the engine's per-supplier risk from the
+# live corridor scores and from a simulated chokepoint cutoff.
+SCORE_CORRIDOR_TO_ENGINE: dict[str, str] = {
+    "hormuz": "Strait of Hormuz",
+    "bab_el_mandeb": "Bab el-Mandeb",
+    "malacca": "Strait of Malacca",
+    "south_china_sea": "South China Sea",
+    "cape_of_good_hope": "Cape of Good Hope",
+    "suez": "Suez or Cape",
 }
 
 
@@ -224,7 +256,9 @@ async def get_scores(commodity: str | None = Query(default=None)) -> list[dict]:
 
 @router.get("/scores/{corridor}")
 async def get_scores_by_corridor(corridor: str) -> list[dict]:
-    all_scores = await get_scores()
+    # Pass commodity=None explicitly: calling get_scores() with no args inside the
+    # process would bind FastAPI's Query(default=None) sentinel, not None.
+    all_scores = await get_scores(commodity=None)
     return [s for s in all_scores if s["corridor"] == corridor]
 
 
@@ -583,17 +617,52 @@ async def integrations_slack(body: dict | None = None) -> dict:
         return {"sent": False, "reason": f"Slack post failed: {exc}"}
 
 
+async def _live_risk_overrides(disrupted_corridor: str | None, severity: float) -> dict[str, float]:
+    """Build per-corridor risk in [0,1] from the live scores, then overlay any
+    simulated chokepoint cutoff. This is what makes sourcing risk dynamic rather
+    than a fixed default table."""
+    scores = await get_scores(commodity=None)
+    by_corridor: dict[str, float] = {}
+    for s in scores:
+        c = str(s.get("corridor"))
+        by_corridor[c] = max(by_corridor.get(c, 0.0), float(s.get("score", 0.0)))
+
+    overrides: dict[str, float] = {}
+    for score_key, engine_label in SCORE_CORRIDOR_TO_ENGINE.items():
+        if score_key in by_corridor:
+            overrides[engine_label] = round(by_corridor[score_key] / 100.0, 4)
+
+    if disrupted_corridor:
+        engine_label = SCORE_CORRIDOR_TO_ENGINE.get(disrupted_corridor)
+        if engine_label:
+            spiked = round(max(0.0, min(1.0, severity)), 4)
+            overrides[engine_label] = max(overrides.get(engine_label, 0.0), spiked)
+    return overrides
+
+
 @router.get("/sourcing/{commodity}")
-async def sourcing(commodity: str, volumeMb: float = Query(default=100)) -> list[dict]:
+async def sourcing(
+    commodity: str,
+    volumeMb: float = Query(default=100),
+    disruptedCorridor: str | None = Query(default=None),
+    severity: float = Query(default=1.0, ge=0.0, le=1.0),
+) -> list[dict]:
     try:
         sourcing_commodity = sourcing_engine.Commodity(commodity)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unknown commodity: {commodity}") from exc
 
+    overrides = await _live_risk_overrides(disruptedCorridor, severity)
     try:
-        options = await sourcing_engine.rank_alternatives(sourcing_commodity)
+        options = await sourcing_engine.rank_alternatives(
+            sourcing_commodity, risk_overrides=overrides
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    disrupted_engine = (
+        SCORE_CORRIDOR_TO_ENGINE.get(disruptedCorridor) if disruptedCorridor else None
+    )
 
     base_price = {
         "crude_oil": 82.0,
@@ -607,32 +676,255 @@ async def sourcing(commodity: str, volumeMb: float = Query(default=100)) -> list
         "uranium": 88.0,
         "lpg": 660.0,
         "atf": 95.0,
+        "copper": 9500.0,
+        "graphite": 1200.0,
+        "manganese": 1800.0,
+        "polysilicon": 8.5,
+        "silver": 31.0,
+        "thermal_coal": 125.0,
+        "pgm": 980.0,
+        "rock_phosphate": 155.0,
+        "potash": 320.0,
     }.get(commodity, 100.0)
 
-    out = []
+    # First pass: classify each supplier's route status and total the share of
+    # the suppliers still open, so recommended volume can be re-normalised onto
+    # the available routes when a chokepoint is cut off.
+    classified: list[tuple[Any, str, float]] = []
+    open_share_total = 0.0
     for opt in options[:8]:
+        opt_corridor = str(getattr(opt, "primary_corridor", ""))
+        if disrupted_engine and opt_corridor == disrupted_engine:
+            status = "closed" if severity >= 0.9 else "disrupted"
+        else:
+            status = "open"
+        share_frac = float(getattr(opt, "historical_share", 0) or 0)
+        if status != "closed":
+            open_share_total += share_frac
+        classified.append((opt, status, share_frac))
+
+    out = []
+    for i, (opt, status, share_frac) in enumerate(classified):
         country = getattr(opt, "source_country", getattr(opt, "country", "Unknown"))
-        rank = getattr(opt, "alternative_rank", getattr(opt, "rank", 1))
-        risk = float(getattr(opt, "current_risk", 30.0))
-        lead = int(getattr(opt, "lead_time_days", 28))
+        rank = i + 1
+        # The engine reports current_risk and historical_share as [0,1] fractions;
+        # surface them on the [0,100] / percentage scale the UI uses.
+        risk = float(getattr(opt, "current_risk", 0.30)) * 100.0
+        # Engine carries a lead-time *score* (1 = fastest), not days — derive a
+        # believable day count from it instead of a constant.
+        lead_score = float(getattr(opt, "lead_time_score", 0.5))
+        lead = int(round(10 + (1.0 - lead_score) * 55))
         rationale = getattr(opt, "rationale", "")
-        share_pct = float(getattr(opt, "share_pct", 0))
-        volume = round(volumeMb * (share_pct / 100.0) if share_pct else volumeMb / max(len(options), 1), 1)
+        opt_corridor = str(getattr(opt, "primary_corridor", "")) or CORRIDOR_LABEL.get(
+            CORRIDOR_FOR_COMMODITY.get(commodity, "hormuz"), "Strait of Hormuz"
+        )
+        import_share_pct = round(share_frac * 100.0, 1)
+        if status == "closed":
+            volume = 0.0
+        elif open_share_total > 0:
+            volume = round(volumeMb * (share_frac / open_share_total), 1)
+        else:
+            volume = round(volumeMb / max(len(classified), 1), 1)
         out.append({
             "rank": rank,
             "supplier": f"{country} consortium",
             "country": country,
             "commodity": commodity,
+            "importSharePct": import_share_pct,
             "volumeMb": volume,
             "priceUsd": round(base_price * (1.0 + (risk - 30) / 100.0), 2),
             "leadTimeDays": lead,
-            "routeCorridor": CORRIDOR_FOR_COMMODITY.get(commodity, "hormuz"),
+            "routeCorridor": opt_corridor,
+            "routeStatus": status,
             "routeRiskScore": round(risk, 1),
             "sanctionsCheck": "flag" if risk > 60 else "clear",
             "carbonIntensity": round(8.0 + (rank * 0.4), 2),
             "notes": rationale,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Demand-side substitution (alternate use cases)
+# ---------------------------------------------------------------------------
+# Complements supply-side country diversification: instead of only "buy the same
+# molecule from another country", these are levers that reduce or replace the
+# *demand* for the import at the point of use. displacementPct figures are
+# indicative planning estimates of how much of the end-use demand the lever could
+# realistically address, NOT modelled outputs — see docs/assumptions.md.
+
+DEMAND_SUBSTITUTES: dict[str, dict] = {
+    "crude_oil": {
+        "primaryUse": "Transport fuels (petrol/diesel) and petrochemical feedstock",
+        "substitutes": [
+            {"name": "Electric vehicles (2W/3W/4W)", "type": "electrification", "maturity": "available", "displacementPct": 18, "leadTimeMonths": 60, "note": "FAME-II + state EV policies; displaces petrol/diesel road demand."},
+            {"name": "Ethanol blending (E20)", "type": "biofuel", "maturity": "available", "displacementPct": 10, "leadTimeMonths": 24, "note": "EBP programme targets 20% blend; cuts petrol crude draw."},
+            {"name": "CNG / city gas in transport", "type": "fuel-switch", "maturity": "available", "displacementPct": 8, "leadTimeMonths": 36, "note": "CGD network expansion; substitutes diesel in fleets/autos."},
+            {"name": "Rail-freight & public transit modal shift", "type": "efficiency", "maturity": "available", "displacementPct": 5, "leadTimeMonths": 48, "note": "Dedicated freight corridors lower per-tonne diesel intensity."},
+        ],
+    },
+    "lpg": {
+        "primaryUse": "Residential cooking fuel (incl. PMUY/Ujjwala households)",
+        "substitutes": [
+            {"name": "Piped Natural Gas (PNG)", "type": "fuel-switch", "maturity": "available", "displacementPct": 35, "leadTimeMonths": 24, "note": "City gas distribution piped to kitchens; needs pipeline buildout but directly replaces LPG cylinders."},
+            {"name": "Electric / induction cooking", "type": "electrification", "maturity": "available", "displacementPct": 20, "leadTimeMonths": 12, "note": "Grid-dependent; effective where power is reliable. Reduces LPG at the appliance."},
+            {"name": "Compressed biogas (CBG / SATAT)", "type": "renewable", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 36, "note": "Agri/urban waste feedstock; domestic, but plant rollout is gradual."},
+            {"name": "Solar / improved cookstoves", "type": "renewable", "maturity": "nascent", "displacementPct": 3, "leadTimeMonths": 12, "note": "Niche; supplements rather than replaces primary cooking."},
+        ],
+    },
+    "lng": {
+        "primaryUse": "Power generation, city gas, and industrial process heat",
+        "substitutes": [
+            {"name": "Renewables + storage (power)", "type": "renewable", "maturity": "available", "displacementPct": 25, "leadTimeMonths": 48, "note": "Solar/wind + BESS displaces gas-fired generation where firm."},
+            {"name": "Domestic gas (KG basin) + CBG", "type": "domestic", "maturity": "emerging", "displacementPct": 12, "leadTimeMonths": 36, "note": "Raises domestic share; reduces import dependence."},
+            {"name": "Green hydrogen for industry", "type": "emerging", "maturity": "emerging", "displacementPct": 6, "leadTimeMonths": 72, "note": "National Hydrogen Mission; long lead, targets high-heat industry."},
+        ],
+    },
+    "coking_coal": {
+        "primaryUse": "Metallurgical coke for blast-furnace steelmaking",
+        "substitutes": [
+            {"name": "Scrap-based EAF steel", "type": "recycling", "maturity": "available", "displacementPct": 25, "leadTimeMonths": 36, "note": "Electric arc furnace on scrap avoids coke entirely; scrap availability is the constraint."},
+            {"name": "Natural-gas DRI (gas-based sponge iron)", "type": "fuel-switch", "maturity": "available", "displacementPct": 15, "leadTimeMonths": 48, "note": "DRI-EAF route; needs competitively priced gas."},
+            {"name": "Green-hydrogen DRI", "type": "emerging", "maturity": "nascent", "displacementPct": 8, "leadTimeMonths": 96, "note": "H2-DRI pilots; capex-heavy, route-level change to primary steel."},
+        ],
+    },
+    "thermal_coal": {
+        "primaryUse": "Coal-fired electricity generation",
+        "substitutes": [
+            {"name": "Solar PV + battery storage", "type": "renewable", "maturity": "available", "displacementPct": 30, "leadTimeMonths": 36, "note": "Cheapest new firm capacity in many states; displaces imported thermal coal first."},
+            {"name": "Wind (onshore/hybrid)", "type": "renewable", "maturity": "available", "displacementPct": 15, "leadTimeMonths": 36, "note": "Complements solar in the generation mix."},
+            {"name": "Domestic coal (Coal India ramp-up)", "type": "domestic", "maturity": "available", "displacementPct": 20, "leadTimeMonths": 12, "note": "Substitutes imported coal where calorific value and logistics permit."},
+            {"name": "Nuclear baseload", "type": "low-carbon", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 120, "note": "Long lead; firm low-carbon baseload."},
+        ],
+    },
+    "lithium": {
+        "primaryUse": "Li-ion batteries for EVs and grid storage",
+        "substitutes": [
+            {"name": "Sodium-ion batteries", "type": "chemistry-switch", "maturity": "emerging", "displacementPct": 12, "leadTimeMonths": 36, "note": "Lithium-free; suits stationary storage and entry EVs."},
+            {"name": "Battery recycling / urban mining", "type": "recycling", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 48, "note": "Recovers lithium from end-of-life cells; scales with the installed base."},
+        ],
+    },
+    "cobalt": {
+        "primaryUse": "Cathode material in Li-ion batteries",
+        "substitutes": [
+            {"name": "LFP (lithium iron phosphate) cells", "type": "chemistry-switch", "maturity": "available", "displacementPct": 40, "leadTimeMonths": 24, "note": "Cobalt-free chemistry now mainstream for standard-range EVs and storage."},
+            {"name": "Sodium-ion batteries", "type": "chemistry-switch", "maturity": "emerging", "displacementPct": 10, "leadTimeMonths": 36, "note": "Cobalt-free and lithium-free."},
+            {"name": "Battery recycling", "type": "recycling", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 48, "note": "High-value cobalt recovery is commercially attractive."},
+        ],
+    },
+    "nickel": {
+        "primaryUse": "Stainless steel and high-energy battery cathodes",
+        "substitutes": [
+            {"name": "LFP cathodes (battery use)", "type": "chemistry-switch", "maturity": "available", "displacementPct": 30, "leadTimeMonths": 24, "note": "Nickel-free; shifts battery demand away from Ni-rich cathodes."},
+            {"name": "Stainless scrap recycling", "type": "recycling", "maturity": "available", "displacementPct": 10, "leadTimeMonths": 36, "note": "Secondary nickel units via stainless scrap."},
+        ],
+    },
+    "rare_earths": {
+        "primaryUse": "NdFeB permanent magnets for EV motors, wind, electronics",
+        "substitutes": [
+            {"name": "Ferrite / induction (magnet-free) motors", "type": "redesign", "maturity": "available", "displacementPct": 20, "leadTimeMonths": 36, "note": "Externally-excited and induction motors avoid NdFeB at some efficiency/size cost."},
+            {"name": "Magnet recycling", "type": "recycling", "maturity": "emerging", "displacementPct": 10, "leadTimeMonths": 48, "note": "Recovers Nd/Pr/Dy from end-of-life magnets."},
+        ],
+    },
+    "solar_pv": {
+        "primaryUse": "Solar module supply for capacity addition",
+        "substitutes": [
+            {"name": "Domestic cell/module (PLI) + wafer/ingot", "type": "domestic", "maturity": "emerging", "displacementPct": 30, "leadTimeMonths": 36, "note": "ALMM + PLI build domestic supply, cutting module import reliance."},
+            {"name": "Wind / hybrid where solar constrained", "type": "renewable", "maturity": "available", "displacementPct": 10, "leadTimeMonths": 36, "note": "Meets the same capacity target with a different technology."},
+        ],
+    },
+    "polysilicon": {
+        "primaryUse": "Feedstock for solar wafers and cells",
+        "substitutes": [
+            {"name": "Domestic polysilicon / ingot-wafer capacity", "type": "domestic", "maturity": "nascent", "displacementPct": 20, "leadTimeMonths": 48, "note": "Upstream PLI integration; long lead but addresses the deepest import dependency."},
+            {"name": "Thin-film (CdTe) modules", "type": "redesign", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 36, "note": "Avoids polysilicon entirely for utility-scale plants."},
+        ],
+    },
+    "copper": {
+        "primaryUse": "Power transmission/distribution cabling and EV wiring",
+        "substitutes": [
+            {"name": "Aluminium conductors (ACSR/AAAC)", "type": "material-switch", "maturity": "available", "displacementPct": 25, "leadTimeMonths": 24, "note": "Standard for overhead T&D lines; reduces copper intensity."},
+            {"name": "Secondary copper (recycling)", "type": "recycling", "maturity": "available", "displacementPct": 15, "leadTimeMonths": 24, "note": "Scrap-based cathode/rod lowers concentrate import need."},
+        ],
+    },
+    "uranium": {
+        "primaryUse": "Fuel for nuclear power reactors",
+        "substitutes": [
+            {"name": "Domestic U + three-stage / thorium cycle", "type": "domestic", "maturity": "emerging", "displacementPct": 15, "leadTimeMonths": 120, "note": "Long-horizon programme to lift indigenous fuel share."},
+            {"name": "Renewables + storage (capacity substitute)", "type": "renewable", "maturity": "available", "displacementPct": 10, "leadTimeMonths": 48, "note": "Meets electricity demand without enriched-fuel imports."},
+        ],
+    },
+    "pgm": {
+        "primaryUse": "Autocatalysts and industrial/refining catalysts",
+        "substitutes": [
+            {"name": "BEV shift (removes autocatalyst need)", "type": "electrification", "maturity": "available", "displacementPct": 25, "leadTimeMonths": 60, "note": "Battery EVs have no exhaust catalyst, eliminating PGM loading."},
+            {"name": "Autocatalyst recycling", "type": "recycling", "maturity": "available", "displacementPct": 20, "leadTimeMonths": 24, "note": "Spent-catalyst recovery is a mature secondary supply."},
+        ],
+    },
+    "graphite": {
+        "primaryUse": "Anode material in Li-ion batteries; refractories",
+        "substitutes": [
+            {"name": "Domestic synthetic graphite", "type": "domestic", "maturity": "available", "displacementPct": 15, "leadTimeMonths": 36, "note": "Needle-coke based; reduces reliance on natural-flake imports."},
+            {"name": "Silicon / Si-blended anodes", "type": "chemistry-switch", "maturity": "emerging", "displacementPct": 12, "leadTimeMonths": 48, "note": "Higher capacity; reduces graphite per kWh."},
+        ],
+    },
+    "manganese": {
+        "primaryUse": "Steel alloying (ferro-manganese) and battery cathodes",
+        "substitutes": [
+            {"name": "Domestic ore (MOIL) + scrap", "type": "domestic", "maturity": "available", "displacementPct": 12, "leadTimeMonths": 24, "note": "Limited substitution — Mn is essential to steel; raise domestic/secondary share."},
+        ],
+    },
+    "silver": {
+        "primaryUse": "PV cell metallisation paste and electrical contacts",
+        "substitutes": [
+            {"name": "Copper-plated PV metallisation", "type": "material-switch", "maturity": "emerging", "displacementPct": 15, "leadTimeMonths": 36, "note": "Copper electroplating cuts silver per cell; entering production."},
+            {"name": "Silver recovery / recycling", "type": "recycling", "maturity": "available", "displacementPct": 8, "leadTimeMonths": 24, "note": "Recovery from spent electronics and PV."},
+        ],
+    },
+    "rock_phosphate": {
+        "primaryUse": "Phosphatic fertiliser (DAP/SSP) feedstock",
+        "substitutes": [
+            {"name": "Nano-DAP / SSP use-efficiency", "type": "efficiency", "maturity": "emerging", "displacementPct": 12, "leadTimeMonths": 24, "note": "Higher nutrient-use efficiency lowers rock phosphate per hectare."},
+            {"name": "Organic / bio-fertiliser + P recycling", "type": "recycling", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 36, "note": "PSB biofertilisers and struvite recovery supplement mineral P."},
+        ],
+    },
+    "potash": {
+        "primaryUse": "Potassic fertiliser (MOP) for agriculture",
+        "substitutes": [
+            {"name": "Domestic K from molasses (PDM) + recycling", "type": "domestic", "maturity": "emerging", "displacementPct": 8, "leadTimeMonths": 36, "note": "Potash-derived-from-molasses and spent-wash recovery raise domestic share."},
+            {"name": "Balanced fertilisation / soil-test based dosing", "type": "efficiency", "maturity": "available", "displacementPct": 6, "leadTimeMonths": 24, "note": "Soil Health Card driven dosing trims excess MOP demand."},
+        ],
+    },
+}
+
+
+@router.get("/sourcing/{commodity}/substitutes")
+async def sourcing_substitutes(commodity: str) -> dict:
+    """Demand-side substitution options (alternate use cases) for a commodity.
+
+    Distinct from the country alternatives in /sourcing/{commodity}: these reduce
+    or replace demand for the import at the point of use rather than re-sourcing
+    the same molecule from a different country.
+    """
+    data = DEMAND_SUBSTITUTES.get(commodity)
+    if not data:
+        return {
+            "commodity": commodity,
+            "primaryUse": None,
+            "substitutes": [],
+            "disclaimer": "No demand-side substitutes modelled for this commodity yet.",
+            "asOf": _now_iso(),
+        }
+    return {
+        "commodity": commodity,
+        "primaryUse": data.get("primaryUse"),
+        "substitutes": data.get("substitutes", []),
+        "disclaimer": (
+            "Displacement figures are indicative planning estimates of addressable "
+            "end-use demand, not modelled outputs."
+        ),
+        "asOf": _now_iso(),
+    }
 
 
 def _build_spr_plan(horizon: int = 60, target_cover_days: float = 12.0, bias: str = "balanced") -> dict:
@@ -719,6 +1011,26 @@ async def post_spr_plan(body: dict | None = None) -> dict:
     return _build_spr_plan(horizon=horizon, target_cover_days=target, bias=bias)
 
 
+def gdelt_context_url(event: dict) -> str:
+    """Build a live, resolvable GDELT article-search URL for a feed event.
+
+    The fixture `urls` point at fabricated article pages that 404. Instead we
+    deep-link into the GDELT DOC 2.0 API article list (rendered as HTML),
+    querying on the event's actors and location so the user lands on real
+    matching coverage rather than a dead link.
+    """
+    terms = [
+        str(event.get(key, "")).strip()
+        for key in ("actor1", "location", "actor2")
+        if str(event.get(key, "")).strip()
+    ]
+    query = " ".join(terms[:2]) or "energy supply chain India"
+    return (
+        "https://api.gdeltproject.org/api/v2/doc/doc?query="
+        f"{quote_plus(query)}&mode=artlist&format=html&sort=datedesc&maxrecords=50"
+    )
+
+
 @router.get("/feed")
 async def feed(limit: int = Query(default=50)) -> list[dict]:
     events = _load_fixture("gdelt_events.json") or []
@@ -729,7 +1041,7 @@ async def feed(limit: int = Query(default=50)) -> list[dict]:
             "source": "GDELT",
             "headline": e.get("actor1", "Event") + " - " + str(e.get("event_code", ""))[:64],
             "summary": f"Tone {e.get('tone', 0)}; near {e.get('location', 'unknown')}",
-            "url": (e.get("urls") or [""])[0] if isinstance(e.get("urls"), list) else "",
+            "url": gdelt_context_url(e),
             "publishedAt": e.get("timestamp", _now_iso()),
             "tags": [str(e.get("theme", ""))],
             "corridor": None,
@@ -1094,6 +1406,150 @@ async def stress_test() -> dict:
     }
 
 
+_CHAT_COMMODITY_TERMS: list[tuple[str, str]] = [
+    ("coking coal", "coking_coal"),
+    ("thermal coal", "thermal_coal"),
+    ("rare earth", "rare_earths"),
+    ("rare-earth", "rare_earths"),
+    ("crude", "crude_oil"),
+    ("oil", "crude_oil"),
+    ("lpg", "lpg"),
+    ("lng", "lng"),
+    ("lithium", "lithium"),
+    ("cobalt", "cobalt"),
+    ("nickel", "nickel"),
+    ("solar", "solar_pv"),
+    ("uranium", "uranium"),
+    ("copper", "copper"),
+    ("graphite", "graphite"),
+    ("manganese", "manganese"),
+    ("polysilicon", "polysilicon"),
+    ("silver", "silver"),
+    ("platinum", "pgm"),
+    ("phosphate", "rock_phosphate"),
+    ("potash", "potash"),
+]
+
+_CHAT_CORRIDOR_KEYWORDS: list[tuple[str, str, str]] = [
+    ("hormuz", "hormuz", "Strait of Hormuz"),
+    ("bab_el_mandeb", "red sea|bab[ -]?el|houthi|mandeb", "Bab el-Mandeb / Red Sea"),
+    ("malacca", "malacca", "Strait of Malacca"),
+    ("south_china_sea", "south china|rare[ -]?earth|\\bscs\\b", "South China Sea"),
+]
+
+
+def _local_chat_answer(
+    question: str,
+    top_scores: list[dict],
+    feed_items: list[dict],
+    scenarios: list[dict],
+    brief: dict,
+) -> str:
+    """Deterministic, question-aware analyst answer for fixture mode.
+
+    In fixture mode (the default demo path) no live LLM is called, so we route
+    the question through keyword matchers and ground the reply in the live
+    score / scenario / brief context. This keeps answers distinct per question
+    rather than echoing a single canned string.
+    """
+    q = question.lower()
+    parts: list[str] = []
+
+    def best_for_corridor(corr: str) -> dict | None:
+        subset = [s for s in top_scores if s.get("corridor") == corr]
+        return max(subset, key=lambda s: s.get("score", 0)) if subset else None
+
+    for corr, pattern, label in _CHAT_CORRIDOR_KEYWORDS:
+        if re.search(pattern, q):
+            s = best_for_corridor(corr)
+            if not s:
+                continue
+            drivers = s.get("drivers") or []
+            driver_txt = f" Lead driver: {drivers[0]}." if drivers else ""
+            parts.append(
+                f"{label} composite risk is {s.get('score')} ({s.get('tier')}), most "
+                f"exposed on {str(s.get('commodity', 'crude_oil')).replace('_', ' ')}.{driver_txt}"
+            )
+
+    matched_commodity = next((code for term, code in _CHAT_COMMODITY_TERMS if term in q), None)
+    if matched_commodity:
+        rel = [s for s in top_scores if s.get("commodity") == matched_commodity]
+        label = matched_commodity.replace("_", " ")
+        if rel:
+            top = max(rel, key=lambda s: s.get("score", 0))
+            parts.append(
+                f"For {label}, the highest-risk lane is "
+                f"{CORRIDOR_LABEL.get(str(top.get('corridor')), top.get('corridor'))} at "
+                f"score {top.get('score')} ({top.get('tier')})."
+            )
+        else:
+            parts.append(
+                f"{label.title()} is covered in the Sourcing module — open Sourcing and select "
+                "it to see ranked supplier countries with their current import share and route risk."
+            )
+
+    if re.search(r"sourc|alternativ|supplier|diversif|import share", q):
+        parts.append(
+            "Sourcing intelligence ranks alternative supplier countries by current corridor "
+            "risk, historical import share, and lead time. Pick a commodity on the Sourcing page "
+            "to see each country's current import share and route risk, and try the 'simulate "
+            "cutoff' control to re-rank suppliers when a chokepoint closes."
+        )
+
+    if re.search(r"replace|substitut|instead of|use[ -]?case|demand[- ]side|switch", q):
+        sub = DEMAND_SUBSTITUTES.get(matched_commodity or "")
+        if sub and sub.get("substitutes"):
+            names = ", ".join(s["name"] for s in sub["substitutes"][:3])
+            parts.append(
+                f"Demand-side substitutes for {(matched_commodity or '').replace('_', ' ')} "
+                f"({sub.get('primaryUse')}): {names}. See the Sourcing page's demand-side "
+                "substitution panel for maturity, displaceable share, and lead time."
+            )
+        else:
+            parts.append(
+                "Beyond alternate countries, the Sourcing page lists demand-side substitutes "
+                "(alternate use cases) per commodity — levers that reduce or replace the import "
+                "at the point of use, e.g. LPG → piped natural gas or induction cooking."
+            )
+
+    if re.search(r"\bspr\b|reserve|drawdown|petroleum reserve|stockpile", q):
+        parts.append(
+            f"Strategic Petroleum Reserve cover stands at ~{BASE_SPR_DAYS} days across "
+            "Visakhapatnam, Mangalore and Padur. The SPR planner solves an LP drawdown / "
+            "replenish schedule under a chosen supply-gap shock."
+        )
+
+    if re.search(r"cost|inaction|rupee|gdp|crore|economic impact", q):
+        parts.append(
+            "Cost-of-inaction converts a scenario's GDP impact (bps) into daily and cumulative "
+            "rupee figures. Run a scenario, then read the cost panel to size the exposure."
+        )
+
+    if re.search(r"scenario|what[ -]?if|simulat|compare", q):
+        names = ", ".join(str(s.get("name", s.get("scenarioId", ""))) for s in scenarios[:4])
+        if names:
+            parts.append(
+                f"Modelled disruption scenarios include {names}. Each projects Brent/LNG/coal "
+                "uplift, GDP bps, and SPR runway from elasticity parameters."
+            )
+
+    if not parts:
+        headline = str(brief.get("headline", "")).strip()
+        summary = str(brief.get("summary") or "")[:300].strip()
+        snap = brief.get("marketSnapshot") or {}
+        brent = snap.get("brentUsd")
+        lead = f"{headline}. {summary}".strip(". ").strip()
+        if lead:
+            parts.append(lead + ".")
+        tail = (
+            "Ask about a specific corridor (Hormuz, Red Sea, Malacca, South China Sea), a "
+            "commodity, sourcing, the SPR, or a scenario for a focused answer."
+        )
+        parts.append(f"Brent is at ${brent}/bbl. {tail}" if brent else tail)
+
+    return " ".join(p for p in parts if p).strip()
+
+
 @router.post("/chat")
 async def chat(body: dict | None = None) -> dict:
     body = body or {}
@@ -1102,48 +1558,53 @@ async def chat(body: dict | None = None) -> dict:
     if not question:
         raise HTTPException(status_code=400, detail="question is required")
 
-    # Gather context
-    top_scores = (await get_scores())[:5]
+    # Gather context. Pass commodity=None explicitly so the in-process call does
+    # not bind FastAPI's Query(default=None) sentinel (which is truthy).
+    top_scores = await get_scores(commodity=None)
     feed_items = (await feed(limit=8))[:8]
     scenario_list = await list_scenarios()
     brief = await executive_brief()
 
+    # Keys here match what build_chat_prompt() expects so the live LLM path is
+    # correctly grounded; the local fallback reads the same structures.
     context = {
-        "topRisks": top_scores,
-        "recentFeed": feed_items,
-        "scenarios": scenario_list,
-        "executiveBrief": {
+        "current_scores": top_scores,
+        "recent_events": feed_items,
+        "top_scenarios": scenario_list,
+        "commodities_basket": sorted(
+            {str(s.get("commodity")) for s in top_scores if s.get("commodity")}
+        ),
+        "executive_brief": {
             "headline": brief.get("headline"),
             "summary": brief.get("summary"),
             "marketSnapshot": brief.get("marketSnapshot"),
         },
+        "history": history,
     }
 
-    # Build prompt + call LLM, with a graceful fallback if anything goes wrong.
-    answer: str
-    try:
-        from app.llm.prompts import build_chat_prompt  # type: ignore
-        from app.llm.summarise import LLMClient  # type: ignore
+    settings = get_settings()
+    live_mode = bool(getattr(settings, "allow_live_ingest", False)) and bool(
+        getattr(settings, "gemini_api_key", None)
+    )
 
-        prompt = build_chat_prompt(question, context, history=history)
-        client = LLMClient()
-        if hasattr(client, "chat"):
-            answer = await client.chat(prompt)  # type: ignore[func-returns-value]
-        elif hasattr(client, "complete"):
-            answer = await client.complete(prompt)  # type: ignore[func-returns-value]
-        else:
+    # In live mode call Gemini with the correct (question, context) signature.
+    # In fixture mode the LLM client only returns a single canned string, so we
+    # skip it entirely and answer from the question-aware local responder —
+    # otherwise every question collapses to the same reply.
+    answer = ""
+    if live_mode:
+        try:
+            from app.llm.summarise import LLMClient  # type: ignore
+
+            client = LLMClient(settings)
+            answer = await client.chat(question, context) or ""
+        except Exception:
             answer = ""
-    except Exception:
-        answer = ""
+        if answer.strip().startswith("[fixture"):
+            answer = ""
 
-    if not answer:
-        fixture = _load_fixture("llm_responses.json") or {}
-        answer = fixture.get("chat_default") or (
-            f"On '{question}': "
-            f"{brief.get('headline', 'Hormuz elevated; Red Sea suspended; SCS rare-earth tightening')}. "
-            f"{brief.get('summary', '')[:280]} "
-            "Use /scenarios to model specific shocks and /cost-of-inaction to size the rupee impact."
-        )
+    if not answer.strip():
+        answer = _local_chat_answer(question, top_scores, feed_items, scenario_list, brief)
 
     citations: list[dict] = [
         {"label": "Live corridor risk scores", "source": "/api/scores"},

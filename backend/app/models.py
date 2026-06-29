@@ -26,6 +26,15 @@ class Commodity(str, Enum):
     SOLAR_PV = "SOLAR_PV"
     URANIUM = "URANIUM"
     LPG = "LPG"
+    COPPER = "COPPER"
+    GRAPHITE = "GRAPHITE"
+    MANGANESE = "MANGANESE"
+    POLYSILICON = "POLYSILICON"
+    SILVER = "SILVER"
+    THERMAL_COAL = "THERMAL_COAL"
+    PGM = "PGM"
+    ROCK_PHOSPHATE = "ROCK_PHOSPHATE"
+    POTASH = "POTASH"
 
 
 class Corridor(str, Enum):
