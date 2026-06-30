@@ -2,8 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   getSPRPlan,
   getScenarios,
+  getSprRuns,
   postSPRBrief,
   postSPRPlan,
+  type SPRRun,
   type ScenarioMeta,
 } from '@/lib/api';
 import type { SPRBrief, SPRPlan } from '@/lib/types';
@@ -17,6 +19,7 @@ interface FormState {
   marketBias: 'north' | 'south' | 'balanced';
   scenarioId: string;
   intensity: number;
+  releaseMode: 'drawdown' | 'swap' | 'exchange';
 }
 
 const DEFAULT_FORM: FormState = {
@@ -25,6 +28,7 @@ const DEFAULT_FORM: FormState = {
   marketBias: 'balanced',
   scenarioId: '',
   intensity: 0.5,
+  releaseMode: 'drawdown',
 };
 
 const URGENCY_PILL: Record<string, string> = {
@@ -50,6 +54,7 @@ function reqFromForm(form: FormState) {
     marketBias: form.marketBias,
     scenarioId: form.scenarioId || null,
     intensity: form.intensity,
+    releaseMode: form.releaseMode,
   };
 }
 
@@ -63,16 +68,22 @@ export default function SPR() {
   const [brief, setBrief] = useState<SPRBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
+  const [recentRuns, setRecentRuns] = useState<SPRRun[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
-        const [p, sc] = await Promise.all([getSPRPlan(), getScenarios()]);
+        const [p, sc, r] = await Promise.all([
+          getSPRPlan(),
+          getScenarios(),
+          getSprRuns(8).catch(() => ({ runs: [] as SPRRun[], asOf: '' })),
+        ]);
         if (cancelled) return;
         setPlan(p);
         setBaseline(syntheticBaseline(p));
         setScenarios(sc);
+        setRecentRuns(r.runs ?? []);
         setError(null);
       } catch (err) {
         if (cancelled) return;
@@ -93,6 +104,13 @@ export default function SPR() {
       setPlan(p);
       setBaseline(syntheticBaseline(p));
       setError(null);
+      // Refresh the recent-plans archive after a solve so the audit log updates live.
+      try {
+        const r = await getSprRuns(8);
+        setRecentRuns(r.runs ?? []);
+      } catch {
+        // non-fatal
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to solve SPR plan');
     } finally {
@@ -192,6 +210,18 @@ export default function SPR() {
             <option value="balanced">Balanced</option>
             <option value="north">North India</option>
             <option value="south">South India</option>
+          </select>
+        </div>
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-3">
+          <label className="text-[10px] uppercase tracking-wider text-slate-500" title="DOE-style SPR release mechanisms">Release mode</label>
+          <select
+            value={form.releaseMode}
+            onChange={(e) => setForm({ ...form, releaseMode: e.target.value as FormState['releaseMode'] })}
+            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100"
+          >
+            <option value="drawdown">Drawdown (spot sale)</option>
+            <option value="swap">Swap (loan vs. future return)</option>
+            <option value="exchange">Exchange (delayed delivery)</option>
           </select>
         </div>
         <div className="flex items-end gap-2">
@@ -405,6 +435,43 @@ export default function SPR() {
           </section>
 
           <NarrativeFeed title="LP rationale" body={plan.rationale} generatedAt={plan.asOf} />
+
+          {recentRuns.length > 0 && (
+            <section className="rounded-lg border border-slate-800 bg-slate-900">
+              <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+                <h3 className="text-sm font-semibold text-slate-100">Recent plan solves</h3>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                  audit log · in-process SQLite
+                </span>
+              </div>
+              <table className="w-full text-[12px]">
+                <thead className="bg-slate-900/50 text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left">When</th>
+                    <th className="px-4 py-2 text-left">Scenario</th>
+                    <th className="px-4 py-2 text-left">Mode</th>
+                    <th className="px-4 py-2 text-right">Intensity</th>
+                    <th className="px-4 py-2 text-right">Peak gap</th>
+                    <th className="px-4 py-2 text-right">Trough cover</th>
+                    <th className="px-4 py-2 text-right">Gap closed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentRuns.map((r) => (
+                    <tr key={r.id} className="border-t border-slate-800 font-mono tabular-nums">
+                      <td className="px-4 py-2 text-slate-400">{fmtTime(r.ran_at)}</td>
+                      <td className="px-4 py-2 text-slate-200">{r.scenario_id ?? '—'}</td>
+                      <td className="px-4 py-2 text-slate-300">{r.release_mode ?? 'drawdown'}</td>
+                      <td className="px-4 py-2 text-right text-slate-300">{r.intensity?.toFixed(2) ?? '—'}</td>
+                      <td className="px-4 py-2 text-right text-amber-300">{r.peak_gap_kbpd?.toFixed(0) ?? '—'}</td>
+                      <td className="px-4 py-2 text-right text-red-300">{r.trough_cover_days?.toFixed(1) ?? '—'}</td>
+                      <td className="px-4 py-2 text-right text-emerald-300">{r.gap_closed_pct?.toFixed(0) ?? '—'}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
         </>
       )}
     </div>

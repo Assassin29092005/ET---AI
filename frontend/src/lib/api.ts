@@ -685,4 +685,63 @@ export function postCompoundScenario(
   });
 }
 
+export interface SPRRun {
+  id: number;
+  scenario_id: string | null;
+  intensity: number | null;
+  horizon_days: number | null;
+  target_cover_days: number | null;
+  bias: string | null;
+  release_mode: string | null;
+  peak_gap_kbpd: number | null;
+  gap_closed_pct: number | null;
+  trough_cover_days: number | null;
+  projected_cover_days: number | null;
+  ran_at: string;
+}
+
+export function getSprRuns(limit = 20): Promise<{ runs: SPRRun[]; asOf: string }> {
+  return request<{ runs: SPRRun[]; asOf: string }>({
+    method: 'GET',
+    url: '/spr/runs',
+    params: { limit },
+  });
+}
+
+export interface ScoreHistoryRow {
+  id: number;
+  corridor: string;
+  score: number;
+  tier: string;
+  computed_at: string;
+}
+
+export function getScoreHistory(
+  corridor?: string,
+  limit = 100,
+): Promise<{ corridor: string | null; rows: ScoreHistoryRow[]; asOf: string }> {
+  return request<{ corridor: string | null; rows: ScoreHistoryRow[]; asOf: string }>({
+    method: 'GET',
+    url: '/scores/history',
+    params: corridor ? { corridor, limit } : { limit },
+  });
+}
+
+export interface ScoreSnapshotPayload {
+  score: number;
+  tier: string;
+  disruptionProbability14d: number;
+  signals: Record<string, number>;
+  detail: Record<string, unknown>;
+}
+
+export function getLatestSnapshot(): Promise<{
+  snapshot: Record<string, ScoreSnapshotPayload>;
+  refreshIntervalSeconds: number;
+  changeThreshold: number;
+  asOf: string;
+}> {
+  return request({ method: 'GET', url: '/scores/latest-snapshot' });
+}
+
 export default client;

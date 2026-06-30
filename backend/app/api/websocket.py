@@ -188,21 +188,48 @@ async def _live_gdelt_items(seen: set[str]) -> list[dict[str, Any]]:
     return out
 
 
-async def ws_feed(websocket: WebSocket) -> None:
-    """Push FeedItem dicts to the client.
+async def _score_update_pump(websocket: WebSocket, queue: asyncio.Queue) -> None:
+    """Drain the scheduler's notification queue and forward each event to the
+    client. Runs as a sibling task alongside the feed loop so headlines and
+    score updates are independently paced."""
+    try:
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ws_feed: score-update pump errored: %s", exc)
 
-    Initial frame: small back-fill from fixtures so the UI is populated.
-    Then: in live mode (ALLOW_LIVE_INGEST=true), poll real GDELT every 60s
-    and push new events. In fixture mode, fall back to the synthetic
-    8-second loop so the demo still has visible motion offline.
+
+async def ws_feed(websocket: WebSocket) -> None:
+    """Push FeedItem dicts AND score-update events to the client.
+
+    Sequence:
+    1. Initial back-fill from fixtures (FeedItems).
+    2. Subscribe to the scheduler's score-change queue — a sibling pump pushes
+       {kind: "score_update", changes: [...]} every time a corridor's score
+       moves by SCORE_CHANGE_THRESHOLD points or its tier changes.
+    3. In live mode: poll GDELT every 60s for fresh headlines.
+       In fixture mode: emit synthetic headlines every 8s for visible motion.
     """
+    from app import scheduler
+
     settings = get_settings()
     live = bool(settings.allow_live_ingest)
     await websocket.accept()
+    queue = scheduler.subscribe()
+    pump_task = asyncio.create_task(_score_update_pump(websocket, queue))
     try:
         for item in _fixture_initial_items(limit=5):
             await websocket.send_json(item)
             await asyncio.sleep(0.05)
+
+        # Push the current snapshot immediately so the UI starts populated
+        # with score data instead of waiting for the first scheduler change.
+        snap = scheduler.last_snapshot()
+        if snap:
+            await websocket.send_json({"kind": "score_snapshot", "snapshot": snap})
 
         if live:
             seen: set[str] = set()
@@ -229,6 +256,9 @@ async def ws_feed(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+    finally:
+        pump_task.cancel()
+        scheduler.unsubscribe(queue)
 
 
 __all__ = ["ws_feed"]

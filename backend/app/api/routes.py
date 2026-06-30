@@ -493,7 +493,11 @@ _SCORE_PAIRS = [
 
 def _live_score_dict(corridor: str, commodity: str, sig: dict, drivers: list[str]) -> dict:
     """Build a per-corridor-x-commodity score dict from live corridor signals."""
-    from app.engines.risk_score import CORRIDOR_COMMODITY_RELEVANCE, tier_from_score
+    from app.engines.risk_score import (
+        CORRIDOR_COMMODITY_RELEVANCE,
+        disruption_probability_14d,
+        tier_from_score,
+    )
 
     rel_key = _COMMODITY_RELEVANCE_KEY.get(commodity, commodity)
     relevance = CORRIDOR_COMMODITY_RELEVANCE.get(corridor, {}).get(rel_key, 0.5)
@@ -505,12 +509,14 @@ def _live_score_dict(corridor: str, commodity: str, sig: dict, drivers: list[str
         "commodity": commodity,
         "score": score,
         "tier": tier_from_score(score),
+        "disruptionProbability14d": disruption_probability_14d(score),
         "components": {
             "geopolitical": round(s.get("geo", 0.0) * 100, 1),
             "chokepoint": round(s.get("ais", 0.0) * 100, 1),
             "weather": 0.0,
             "market": round(s.get("price_vol", 0.0) * 100, 1),
             "sanctions": round(s.get("sanctions", 0.0) * 100, 1),
+            "news": round(s.get("news", 0.0) * 100, 1),
         },
         "drivers": drivers,
         "confidence": 0.82,
@@ -551,6 +557,36 @@ async def get_scores(commodity: str | None = Query(default=None)) -> list[dict]:
             _risk_score_dict(corridor, comm, _seeded_score(corridor, comm))
             for corridor, comm in pairs
         ]
+
+
+@router.get("/scores/history")
+async def get_score_history(
+    corridor: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict:
+    """Score history archive — the *evidence* that scoring updates continuously.
+    Returns the most-recent N rows from the score_history table, optionally
+    filtered by corridor. Each row is one snapshot at the scheduler's tick."""
+    from app import persistence
+    return {
+        "corridor": corridor,
+        "rows": persistence.list_score_history(corridor=corridor, limit=limit),
+        "asOf": _now_iso(),
+    }
+
+
+@router.get("/scores/latest-snapshot")
+async def get_latest_snapshot() -> dict:
+    """The scheduler's most recent in-memory snapshot (no DB read).
+    Useful when the UI wants to know the *current* state without forcing a
+    fresh compute."""
+    from app import scheduler
+    return {
+        "snapshot": scheduler.last_snapshot(),
+        "refreshIntervalSeconds": scheduler.SCORE_REFRESH_SECONDS,
+        "changeThreshold": scheduler.SCORE_CHANGE_THRESHOLD,
+        "asOf": _now_iso(),
+    }
 
 
 @router.get("/scores/suppliers/{commodity}")
@@ -1941,16 +1977,31 @@ def _replenishment_windows(central_gap: list[float], horizon: int) -> tuple[list
     return windows, allowed
 
 
+# Release-mode shapes the LP's cost structure + draw ceiling. These are
+# documented DOE-style SPR release mechanisms:
+#   drawdown : outright sale at spot, fastest, biggest price impact closure
+#   swap     : loaned crude against future-dated return, lower net cost but
+#              slower because a return-obligation pulls reserve back up
+#   exchange : delayed-delivery contracts, smallest disruption, slowest
+_RELEASE_MODE_PROFILE: dict[str, dict[str, float]] = {
+    "drawdown": {"draw_cap_kbpd": 600.0, "price_impact_coef": 1.00, "replenish_cost_coef": 0.05, "rebuild_pull": 0.00},
+    "swap":     {"draw_cap_kbpd": 500.0, "price_impact_coef": 0.85, "replenish_cost_coef": 0.03, "rebuild_pull": 0.35},
+    "exchange": {"draw_cap_kbpd": 350.0, "price_impact_coef": 0.70, "replenish_cost_coef": 0.02, "rebuild_pull": 0.50},
+}
+
+
 def _build_spr_plan(
     horizon: int = 60,
     target_cover_days: float = 6.0,
     bias: str = "balanced",
     scenario_id: str | None = None,
     intensity: float = 0.5,
+    release_mode: str = "drawdown",
 ) -> dict:
     sites = [dict(s) for s in _SPR_SITES]
     total_capacity = sum(s["capacityMb"] for s in sites)
     current_fill = sum(s["fillMb"] for s in sites)
+    profile = _RELEASE_MODE_PROFILE.get(release_mode, _RELEASE_MODE_PROFILE["drawdown"])
 
     # Days-of-import cover basis, anchored so current fill reads as BASE_SPR_DAYS;
     # cover and the target-cover reserve floor share this single basis.
@@ -1966,21 +2017,26 @@ def _build_spr_plan(
 
     config = spr_engine.SPRConfig(
         starting_reserve_mmb=round(current_fill, 3),
-        max_daily_drawdown_kbpd=600.0,
+        # Release mode tightens the daily ceiling: a swap or exchange runs
+        # through tenders/contracts and physically can't draw as fast as an
+        # outright drawdown sale.
+        max_daily_drawdown_kbpd=profile["draw_cap_kbpd"],
         max_daily_replenish_kbpd=300.0,
         daily_consumption_kbpd=total_demand_kbpd or 4800.0,
         supply_gap_curve=gap_curve,
         planning_horizon_days=horizon,
         reserve_floor_mmb=reserve_floor,
-        # Unmet shortfall is weighted in kbpd; the floor slack is in Mbbl (a 1000x
-        # smaller scale). Scale the penalty past that conversion so the floor acts
-        # as a near-hard drawdown limit: a higher target cover preserves reserve
-        # at the cost of leaving more of the shortfall uncovered.
         floor_penalty_coef=1500.0,
+        # Each release mode prices the unmet shortfall and the rebuild cost
+        # differently — see _RELEASE_MODE_PROFILE for the documented numbers.
+        price_impact_coef=profile["price_impact_coef"],
+        replenish_cost_coef=profile["replenish_cost_coef"],
         capacity_mmb=round(total_capacity, 3),
         replenish_allowed=replenish_allowed,
-        # Only reward rebuilding when there is an actual shock to recover from.
-        rebuild_reward_coef=80.0 if peak_gap > 1.0 else 0.0,
+        # Reward rebuilding only when there's an actual shock to recover from,
+        # and dampen the reward for swap/exchange (their structural return
+        # obligation already pulls reserve back up).
+        rebuild_reward_coef=(80.0 * (1.0 - profile["rebuild_pull"])) if peak_gap > 1.0 else 0.0,
     )
     try:
         plan = spr_engine.solve_spr_plan(config)
@@ -2076,7 +2132,7 @@ def _build_spr_plan(
         s["drawRateMbPerDay"] = round(avg_active_draw * (w / total_weight), 3)
         s.pop("market", None)
 
-    return {
+    response = {
         "asOf": _now_iso(),
         "totalCapacityMb": round(total_capacity, 2),
         "currentFillMb": round(current_fill, 2),
@@ -2092,13 +2148,28 @@ def _build_spr_plan(
         "scenarioLabel": scenario_label,
         "targetCoverDays": round(target_cover_days, 1),
         "marketBias": bias,
+        "releaseMode": release_mode,
+        "releaseModeProfile": profile,
         "sites": sites,
         "refineryDemand": refineries,
         "gapForecast": gap_forecast,
         "replenishmentWindows": windows,
         "releaseSchedule": release_schedule,
         "rationale": rationale,
+        # Carried for persistence; trimmed off in the API response below.
+        "_horizon": horizon,
+        "_intensity": intensity,
     }
+
+    # Archive each plan run for the history view. Best-effort.
+    try:
+        from app import persistence
+        persistence.log_spr_plan(response)
+    except Exception:
+        pass
+    response.pop("_horizon", None)
+    response.pop("_intensity", None)
+    return response
 
 
 def _spr_urgency(plan: dict) -> str:
@@ -2200,6 +2271,12 @@ def _spr_params_from_body(body: dict) -> dict:
     bias = str(body.get("marketBias", "balanced"))
     scenario_id = body.get("scenarioId") or None
     intensity = float(body.get("intensity", body.get("shockSeverity", 0.5)))
+    release_mode = str(body.get("releaseMode", "drawdown")).lower()
+    if release_mode not in ("drawdown", "swap", "exchange"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"releaseMode must be one of drawdown|swap|exchange (got {release_mode!r})",
+        )
     if scenario_id is not None and scenario_id not in SCENARIOS:
         raise HTTPException(status_code=404, detail=f"Unknown scenario: {scenario_id}")
     return {
@@ -2208,12 +2285,24 @@ def _spr_params_from_body(body: dict) -> dict:
         "bias": bias,
         "scenario_id": scenario_id,
         "intensity": intensity,
+        "release_mode": release_mode,
     }
 
 
 @router.post("/spr/plan")
 async def post_spr_plan(body: dict | None = None) -> dict:
     return _build_spr_plan(**_spr_params_from_body(body or {}))
+
+
+@router.get("/spr/runs")
+async def list_spr_runs(limit: int = Query(default=20, ge=1, le=200)) -> dict:
+    """Audit log of past SPR plan solves — shows that the agent has been
+    iterated repeatedly, not just clicked once during the demo."""
+    from app import persistence
+    return {
+        "runs": persistence.list_spr_plans(limit=limit),
+        "asOf": _now_iso(),
+    }
 
 
 @router.post("/spr/brief")

@@ -13,6 +13,7 @@ from app.engines.risk_score import (
     TIER_BANDS,
     WEIGHT_AIS,
     WEIGHT_GEO,
+    WEIGHT_NEWS,
     WEIGHT_PRICE,
     WEIGHT_SANCTIONS,
     _clip01,
@@ -22,7 +23,8 @@ from app.engines.risk_score import (
 
 
 def test_weights_sum_to_one():
-    assert WEIGHT_GEO + WEIGHT_AIS + WEIGHT_SANCTIONS + WEIGHT_PRICE == pytest.approx(1.0)
+    total = WEIGHT_GEO + WEIGHT_AIS + WEIGHT_SANCTIONS + WEIGHT_PRICE + WEIGHT_NEWS
+    assert total == pytest.approx(1.0)
 
 
 def test_tier_bands_cover_zero_to_one_hundred():

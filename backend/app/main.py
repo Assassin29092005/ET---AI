@@ -77,7 +77,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("startup.baselines_refreshed", live=snapshot)
     except Exception as exc:
         log.warning("startup.baselines_failed", error=str(exc))
+
+    # Start the continuous risk-score refresh loop. This is the "live, not
+    # weekly" half of the Geopolitical Risk Intelligence Agent — see scheduler.py.
+    # Awaits one initial refresh inline so the snapshot is ready immediately.
+    try:
+        from app import scheduler
+        await scheduler.start()
+    except Exception as exc:
+        log.warning("startup.scheduler_failed", error=str(exc))
+
     yield
+
+    # Graceful shutdown — let the scheduler finish its current cycle.
+    try:
+        from app import scheduler
+        await scheduler.stop()
+    except Exception:
+        pass
     log.info("shutdown.complete")
 
 

@@ -31,8 +31,10 @@ from app.engines.risk_score import (
     CORRIDOR_COMMODITY_RELEVANCE,
     WEIGHT_AIS,
     WEIGHT_GEO,
+    WEIGHT_NEWS,
     WEIGHT_PRICE,
     WEIGHT_SANCTIONS,
+    disruption_probability_14d,
     tier_from_score,
 )
 
@@ -222,6 +224,99 @@ async def _sanctions_signals() -> dict[str, dict[str, Any]]:
     return out
 
 
+# Per-corridor news queries — designed to hit recent headlines about each
+# chokepoint without over-matching on generic geographic mentions. NewsAPI is
+# Boolean OR; GDELT DOC also accepts quoted phrases.
+CORRIDOR_NEWS_QUERIES: dict[str, str] = {
+    "hormuz": '"Strait of Hormuz" OR "Persian Gulf" tanker OR Iran navy OR Hormuz transit',
+    "bab_el_mandeb": '"Bab el-Mandeb" OR "Red Sea" Houthi OR Yemen shipping OR Bab al-Mandab',
+    "malacca": '"Strait of Malacca" OR Indonesia shipping OR Singapore tanker',
+    "south_china_sea": '"South China Sea" shipping OR China coast guard OR Taiwan strait',
+    "cape_of_good_hope": '"Cape of Good Hope" OR South Africa tanker OR Cape rerouting',
+    "suez": '"Suez Canal" OR Egypt transit OR Suez tariff',
+}
+
+# Lightweight keyword-based sentiment proxy — we don't ship an NLP model.
+# Negative tokens raise the risk signal, positive tokens dampen it.
+_NEG_TOKENS = (
+    "attack", "strike", "drone", "missile", "explosion", "fire", "blast",
+    "halt", "suspend", "suspended", "closed", "closure", "blockade", "embargo",
+    "sanction", "sanctions", "disruption", "outage", "incident", "casualty",
+    "evacuate", "evacuation", "tension", "threat", "warning", "crisis",
+    "hijack", "boarding", "seized", "detained", "spoof", "spoofing",
+)
+_POS_TOKENS = (
+    "resume", "resumed", "reopen", "reopened", "open", "eased", "ease",
+    "deal", "agreement", "treaty", "ceasefire", "peace", "deal-signed",
+    "release", "freed", "lifted", "restored",
+)
+
+_NEWS_SATURATION_ARTICLES = 20  # 20 articles in 24h -> full count signal
+_NEWS_SATURATION_NEGATIVE = 10  # 10 negative-sentiment hits -> full bad signal
+
+
+def _sentiment_score(text: str) -> float:
+    """Return a value in [-1, 1]: negative for risk-up news, positive for de-risk."""
+    if not text:
+        return 0.0
+    t = text.lower()
+    neg = sum(1 for w in _NEG_TOKENS if w in t)
+    pos = sum(1 for w in _POS_TOKENS if w in t)
+    total = neg + pos
+    if total == 0:
+        return 0.0
+    return (pos - neg) / total
+
+
+async def _news_signals() -> dict[str, dict[str, Any]]:
+    """Per-corridor news signal from NewsAPI (live, with key) or GDELT DOC API
+    (live, no key) or local fixture. Built from two ingredients:
+      * Article COUNT in the last 24h (normalised against saturation)
+      * Negative-sentiment SHARE (keyword-based proxy; documented above)
+    Final signal = 0.5 * count_signal + 0.5 * negativity_signal."""
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        from app.ingest import news as news_mod
+    except Exception:
+        return {c: {"signal": 0.0, "count": 0, "negative_share": 0.0, "topHeadline": ""} for c in CORRIDOR_CENTROID}
+
+    for c, query in CORRIDOR_NEWS_QUERIES.items():
+        try:
+            articles = await news_mod.fetch_headlines(query, hours=24)
+        except Exception:
+            articles = []
+        articles = articles if isinstance(articles, list) else []
+        n = len(articles)
+        # Aggregate sentiment across title + description.
+        scores: list[float] = []
+        top_neg_headline = ""
+        top_neg_score = 0.0
+        for a in articles:
+            if not isinstance(a, dict):
+                continue
+            text = f"{a.get('title','')} {a.get('description','')}"
+            s = _sentiment_score(text)
+            scores.append(s)
+            if s < top_neg_score:
+                top_neg_score = s
+                top_neg_headline = str(a.get("title") or "")[:140]
+        negative_share = (
+            sum(1 for s in scores if s < 0) / max(len(scores), 1) if scores else 0.0
+        )
+        count_signal = _clip01(n / _NEWS_SATURATION_ARTICLES)
+        negativity_signal = _clip01(
+            (sum(1 for s in scores if s < 0) / _NEWS_SATURATION_NEGATIVE) if scores else 0.0
+        )
+        signal = 0.5 * count_signal + 0.5 * negativity_signal
+        out[c] = {
+            "signal": _clip01(signal),
+            "count": n,
+            "negative_share": round(negative_share, 2),
+            "topHeadline": top_neg_headline,
+        }
+    return out
+
+
 async def _price_vol_signals() -> dict[str, dict[str, Any]]:
     """Recent price volatility of each corridor's primary commodity."""
     from app.api.routes import _load_fixture
@@ -259,11 +354,18 @@ async def _price_vol_signals() -> dict[str, dict[str, Any]]:
 
 
 async def compute_live_corridor_signals() -> dict[str, dict[str, Any]]:
-    """Aggregate all four signal streams into per-corridor sub-signals + score."""
-    geo = await _geo_signals()
+    """Aggregate all FIVE signal streams into per-corridor sub-signals + score.
+    Streams: GDELT events, AIS anomaly, sanctions exposure, price volatility,
+    news headlines. Weights documented in risk_score.py."""
+    import asyncio
+
+    geo, sanc, price, news = await asyncio.gather(
+        _geo_signals(),
+        _sanctions_signals(),
+        _price_vol_signals(),
+        _news_signals(),
+    )
     ais = _ais_signals()
-    sanc = await _sanctions_signals()
-    price = await _price_vol_signals()
 
     result: dict[str, dict[str, Any]] = {}
     for c in CORRIDOR_CENTROID:
@@ -271,18 +373,29 @@ async def compute_live_corridor_signals() -> dict[str, dict[str, Any]]:
         a = ais.get(c, {}).get("signal", 0.0)
         s = sanc.get(c, {}).get("signal", 0.0)
         p = price.get(c, {}).get("signal", 0.0)
-        composite = WEIGHT_GEO * g + WEIGHT_AIS * a + WEIGHT_SANCTIONS * s + WEIGHT_PRICE * p
+        n = news.get(c, {}).get("signal", 0.0)
+        composite = (
+            WEIGHT_GEO * g
+            + WEIGHT_AIS * a
+            + WEIGHT_SANCTIONS * s
+            + WEIGHT_PRICE * p
+            + WEIGHT_NEWS * n
+        )
         score = round(100.0 * composite, 1)
         result[c] = {
             "score": score,
             "tier": tier_from_score(score),
-            "signals": {"geo": g, "ais": a, "sanctions": s, "price_vol": p},
+            "disruptionProbability14d": disruption_probability_14d(score),
+            "signals": {"geo": g, "ais": a, "sanctions": s, "price_vol": p, "news": n},
             "detail": {
                 "geoEvents": geo.get(c, {}).get("count", 0),
                 "topActor": geo.get(c, {}).get("topActor", ""),
                 "vesselCount": ais.get(c, {}).get("count", 0),
                 "sanctionMatches": sanc.get(c, {}).get("matches", 0),
                 "priceCommodity": price.get(c, {}).get("commodity", ""),
+                "newsCount": news.get(c, {}).get("count", 0),
+                "newsNegativeShare": news.get(c, {}).get("negative_share", 0.0),
+                "newsTopHeadline": news.get(c, {}).get("topHeadline", ""),
             },
         }
     return result
@@ -292,6 +405,11 @@ def drivers_from_signals(corridor: str, sig: dict[str, Any]) -> list[str]:
     """Top-3 human-readable contributors, sorted by weighted impact."""
     s = sig["signals"]
     d = sig["detail"]
+    news_msg = f"News: {d.get('newsCount', 0)} articles in 24h"
+    if d.get("newsNegativeShare", 0) > 0.4:
+        news_msg += f" ({int(100 * d['newsNegativeShare'])}% negative)"
+    if d.get("newsTopHeadline"):
+        news_msg += f" — \"{d['newsTopHeadline'][:80]}\""
     contribs = [
         ("geo", WEIGHT_GEO * s["geo"], f"GDELT: {d['geoEvents']} events near corridor"
             + (f" (top: {d['topActor']})" if d["topActor"] else "")),
@@ -300,6 +418,7 @@ def drivers_from_signals(corridor: str, sig: dict[str, Any]) -> list[str]:
             f"Sanctions: {d['sanctionMatches']} flagged vessel(s) on corridor"),
         ("price", WEIGHT_PRICE * s["price_vol"],
             f"{d['priceCommodity'].replace('_', ' ')} price volatility"),
+        ("news", WEIGHT_NEWS * s.get("news", 0.0), news_msg),
     ]
     contribs.sort(key=lambda x: x[1], reverse=True)
     return [text for _, weight, text in contribs if weight > 0.001][:3]
