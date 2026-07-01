@@ -87,12 +87,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         log.warning("startup.scheduler_failed", error=str(exc))
 
+    # Start the live AIS consumer. Runs a single WebSocket subscription with
+    # the 6 corridor bounding boxes when AISSTREAM_API_KEY is set; no-op
+    # otherwise so the fixture path still serves the demo.
+    try:
+        from app.ingest import ais_stream
+        await ais_stream.start()
+    except Exception as exc:
+        log.warning("startup.ais_stream_failed", error=str(exc))
+
     yield
 
     # Graceful shutdown — let the scheduler finish its current cycle.
     try:
         from app import scheduler
         await scheduler.stop()
+    except Exception:
+        pass
+    try:
+        from app.ingest import ais_stream
+        await ais_stream.stop()
     except Exception:
         pass
     log.info("shutdown.complete")

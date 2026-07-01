@@ -168,6 +168,25 @@ export interface ReplenishmentWindow {
   reason: string;
 }
 
+export interface SPRUncertainty {
+  method: string;
+  samples: number;
+  rngSeed: number;
+  peakP10: number;
+  peakP50: number;
+  peakP90: number;
+  probAbove500Kbpd: number;
+  probAbove1000Kbpd: number;
+  probAbove2000Kbpd: number;
+  perturbations: {
+    intensity_stddev: number;
+    elasticity_stddev_frac: number;
+    share_stddev_frac: number;
+    exposure_lognormal_sigma: number;
+    shock_days_jitter: number;
+  };
+}
+
 export interface SPRPlan {
   asOf: string;
   totalCapacityMb: number;
@@ -193,6 +212,7 @@ export interface SPRPlan {
   }>;
   refineryDemand?: RefineryDemand[];
   gapForecast?: GapForecastPoint[];
+  uncertainty?: SPRUncertainty;
   replenishmentWindows?: ReplenishmentWindow[];
   releaseSchedule: Array<{
     day: number;

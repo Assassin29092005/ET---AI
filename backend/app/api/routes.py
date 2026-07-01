@@ -559,6 +559,14 @@ async def get_scores(commodity: str | None = Query(default=None)) -> list[dict]:
         ]
 
 
+@router.get("/ais/status")
+async def ais_status() -> dict:
+    """Live-AIS consumer health probe — used by the UI to badge the twin
+    with 'live' when the WebSocket is receiving position reports."""
+    from app.ingest import ais_stream
+    return {**ais_stream.status(), "asOf": _now_iso()}
+
+
 @router.get("/scores/history")
 async def get_score_history(
     corridor: str | None = Query(default=None),
@@ -1038,11 +1046,24 @@ def _vessel_corridor(lat: float, lon: float) -> Optional[str]:
 @router.get("/digital-twin/state")
 async def twin_state() -> dict:
     vessels_fixture = _load_fixture("vessels.json") or []
-    vessel_count = len(vessels_fixture) if isinstance(vessels_fixture, list) else 0
-    # Normalise the fixture into the TwinVessel shape the frontend renders.
-    # Anomaly flag: speed below 2 kn often indicates AIS spoofing or drift.
+    fixture_count = len(vessels_fixture) if isinstance(vessels_fixture, list) else 0
+
+    # Live AIS gets priority when the consumer is receiving. Otherwise fall
+    # through to the fixture path (which was already the demo default).
+    from app.ingest import ais_stream
+    live_positions = ais_stream.get_live_vessel_positions(limit=80)
+
     vessel_positions: list[dict] = []
-    if isinstance(vessels_fixture, list):
+    ais_source = "fixture"
+    if live_positions:
+        ais_source = "live"
+        for v in live_positions:
+            # Strip the internal timestamp key before returning to the client.
+            row = {k: v[k] for k in v if not k.startswith("_")}
+            vessel_positions.append(row)
+    elif isinstance(vessels_fixture, list):
+        # Normalise the fixture into the TwinVessel shape the frontend renders.
+        # Anomaly flag: speed below 2 kn often indicates AIS spoofing or drift.
         for v in vessels_fixture[:80]:
             try:
                 lat = float(v.get("lat"))
@@ -1064,6 +1085,7 @@ async def twin_state() -> dict:
                 "lastSeen": v.get("last_seen") or "",
                 "anomaly": speed < 2.0,
             })
+    vessel_count = len(vessel_positions) if ais_source == "live" else (fixture_count or 60)
 
     corridor_status = {
         "hormuz": "congested",
@@ -1120,7 +1142,8 @@ async def twin_state() -> dict:
     return {
         "asOf": _now_iso(),
         "corridors": corridors_out,
-        "vessels": vessel_count or 60,
+        "vessels": vessel_count,
+        "aisSource": ais_source,
         "vesselPositions": vessel_positions,
         "storage": {
             "sprFillPct": 78.5,
@@ -1909,48 +1932,6 @@ def _refinery_demand_curves(disrupted_corridor: str | None) -> tuple[list[dict],
     return out, round(total_demand, 1), round(total_exposure, 1)
 
 
-def _spr_gap_forecast(
-    horizon: int,
-    scenario_id: str | None,
-    intensity: float,
-    exposure_kbpd: float,
-) -> tuple[list[float], list[dict], float, str]:
-    """Forecast the daily crude supply gap (kbpd) with an uncertainty band.
-
-    The central path scales the refinery exposure by intensity over a ramped
-    plateau-then-decay shock. The band is a parametric cone that widens with the
-    horizon (a planning uncertainty estimate, not a statistical model).
-    """
-    shock_days = min(21, max(7, horizon // 3))
-    crude_relevant = True
-    if scenario_id and scenario_id in SCENARIOS:
-        crude_relevant = _scenario_commodity(scenario_id) in ("crude_oil",)
-        peak = exposure_kbpd * max(0.0, min(1.0, intensity)) if crude_relevant else 0.0
-        label = f"{_humanize(scenario_id)} ({intensity:.0%} intensity)"
-    else:
-        peak = exposure_kbpd * 0.5
-        label = "Generic crude shortfall"
-
-    central: list[float] = []
-    forecast: list[dict] = []
-    for d in range(horizon):
-        if d < shock_days:
-            base = peak
-        elif d < 2 * shock_days:
-            base = peak * 0.4
-        else:
-            base = 0.0
-        unc = base * (0.15 + 0.012 * d) if base > 0 else 0.0
-        central.append(round(base, 1))
-        forecast.append({
-            "day": d,
-            "central": round(base, 1),
-            "low": round(max(0.0, base - unc), 1),
-            "high": round(base + unc, 1),
-        })
-    return central, forecast, round(peak, 1), label
-
-
 def _replenishment_windows(central_gap: list[float], horizon: int) -> tuple[list[dict], list[bool]]:
     """Identify replenishment windows: contiguous post-shock days with no gap,
     when crude can be bought back to refill the reserve at eased prices."""
@@ -2010,9 +1991,28 @@ def _build_spr_plan(
 
     scenario_corridor = _scenario_corridor(scenario_id) if scenario_id else "hormuz"
     refineries, total_demand_kbpd, exposure_kbpd = _refinery_demand_curves(scenario_corridor)
-    gap_curve, gap_forecast, peak_gap, scenario_label = _spr_gap_forecast(
-        horizon, scenario_id, intensity, exposure_kbpd
+
+    # Monte Carlo confidence band replaces the earlier stylised (parametric)
+    # widener. Central path (p50) still feeds the LP; the p10/p90 envelope is
+    # surfaced to the UI. See engines/spr_uncertainty.py for the perturbation
+    # distributions.
+    from app.engines.spr_uncertainty import monte_carlo_gap_forecast
+    scenario_params = SCENARIOS[scenario_id].params if scenario_id else {}
+    if scenario_id:
+        scenario_label = f"{_humanize(scenario_id)} ({intensity:.0%} intensity)"
+    else:
+        scenario_label = "Generic crude shortfall"
+    mc = monte_carlo_gap_forecast(
+        scenario_id=scenario_id,
+        intensity=intensity,
+        exposure_kbpd=exposure_kbpd,
+        horizon=horizon,
+        scenario_params=scenario_params,
     )
+    gap_curve = mc["central"]
+    gap_forecast = mc["forecast"]
+    peak_gap = mc["peak"]
+    uncertainty = mc["uncertainty"]
     windows, replenish_allowed = _replenishment_windows(gap_curve, horizon)
 
     config = spr_engine.SPRConfig(
@@ -2153,6 +2153,7 @@ def _build_spr_plan(
         "sites": sites,
         "refineryDemand": refineries,
         "gapForecast": gap_forecast,
+        "uncertainty": uncertainty,
         "replenishmentWindows": windows,
         "releaseSchedule": release_schedule,
         "rationale": rationale,

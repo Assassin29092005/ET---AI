@@ -366,19 +366,43 @@ export default function SPR() {
               <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
                 <h3 className="mb-2 text-sm font-semibold text-slate-100">Supply-gap forecast</h3>
                 <p className="text-xs text-slate-400">
-                  Peak shortfall <span className="tabular-nums text-slate-200">{fmtNumber(plan.peakGapKbpd ?? 0, 0)} kbpd</span>
-                  {plan.gapForecast && plan.gapForecast.length > 0 && (
+                  Peak shortfall (p50){' '}
+                  <span className="tabular-nums text-slate-200">
+                    {fmtNumber(plan.uncertainty?.peakP50 ?? plan.peakGapKbpd ?? 0, 0)} kbpd
+                  </span>
+                  {plan.uncertainty && (
                     <>
-                      {' '}· band at day 10{' '}
+                      {' '}· 80% CI{' '}
                       <span className="tabular-nums text-slate-300">
-                        {fmtNumber(plan.gapForecast[Math.min(10, plan.gapForecast.length - 1)].low, 0)}–
-                        {fmtNumber(plan.gapForecast[Math.min(10, plan.gapForecast.length - 1)].high, 0)} kbpd
+                        {fmtNumber(plan.uncertainty.peakP10, 0)}–{fmtNumber(plan.uncertainty.peakP90, 0)} kbpd
                       </span>
                     </>
                   )}
                 </p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  Central path × intensity with a parametric uncertainty cone (planning estimate).
+                {plan.uncertainty && (
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+                    <div className="rounded border border-slate-800 bg-slate-950/60 p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500">P(peak &gt; 500 kbpd)</div>
+                      <div className="mt-0.5 font-mono tabular-nums text-slate-200">
+                        {(plan.uncertainty.probAbove500Kbpd * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                    <div className="rounded border border-slate-800 bg-slate-950/60 p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500">P(peak &gt; 1000 kbpd)</div>
+                      <div className={`mt-0.5 font-mono tabular-nums ${plan.uncertainty.probAbove1000Kbpd > 0.3 ? 'text-amber-300' : 'text-slate-200'}`}>
+                        {(plan.uncertainty.probAbove1000Kbpd * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                    <div className="rounded border border-slate-800 bg-slate-950/60 p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500">P(peak &gt; 2000 kbpd)</div>
+                      <div className={`mt-0.5 font-mono tabular-nums ${plan.uncertainty.probAbove2000Kbpd > 0.1 ? 'text-red-300' : 'text-slate-200'}`}>
+                        {(plan.uncertainty.probAbove2000Kbpd * 100).toFixed(0)}%
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <p className="mt-2 text-[11px] text-slate-500">
+                  {plan.uncertainty?.method ?? 'Central path with parametric band.'}
                 </p>
               </div>
               <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">

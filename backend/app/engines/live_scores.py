@@ -142,40 +142,53 @@ async def _geo_signals() -> dict[str, dict[str, Any]]:
 
 
 def _ais_signals() -> dict[str, dict[str, Any]]:
-    """Vessel-count anomaly per corridor from the AIS snapshot / fixture."""
-    from app.api.routes import _load_fixture
+    """Vessel-count anomaly per corridor.
 
-    vessels = _load_fixture("vessels.json") or []
+    Priority: live AISStream buffers → per-corridor tag on fixture → nearest-
+    centroid bbox on fixture. The live path only kicks in when the AISStream
+    consumer has actually received data (see ingest.ais_stream.status)."""
+    from app.api.routes import _load_fixture
+    from app.ingest import ais_stream
+
     counts: dict[str, int] = {c: 0 for c in CORRIDOR_CENTROID}
-    if isinstance(vessels, list):
-        for v in vessels:
-            if not isinstance(v, dict):
-                continue
-            corr = v.get("corridor")
-            if corr in counts:
-                counts[corr] += 1
-            else:
-                lat, lon = v.get("lat"), v.get("lon")
-                if lat is None or lon is None:
+    source = "fixture"
+
+    live_counts = ais_stream.get_live_vessel_counts()
+    if live_counts:
+        for c in counts:
+            counts[c] = int(live_counts.get(c, 0))
+        source = "live"
+    else:
+        vessels = _load_fixture("vessels.json") or []
+        if isinstance(vessels, list):
+            for v in vessels:
+                if not isinstance(v, dict):
                     continue
-                try:
-                    lat, lon = float(lat), float(lon)
-                except (TypeError, ValueError):
-                    continue
-                best_c, best_d = None, 1e9
-                for c, (clat, clon) in CORRIDOR_CENTROID.items():
-                    d = _haversine_deg(lat, lon, clat, clon)
-                    if d < best_d:
-                        best_c, best_d = c, d
-                if best_c and best_d <= 12.0:
-                    counts[best_c] += 1
+                corr = v.get("corridor")
+                if corr in counts:
+                    counts[corr] += 1
+                else:
+                    lat, lon = v.get("lat"), v.get("lon")
+                    if lat is None or lon is None:
+                        continue
+                    try:
+                        lat, lon = float(lat), float(lon)
+                    except (TypeError, ValueError):
+                        continue
+                    best_c, best_d = None, 1e9
+                    for c, (clat, clon) in CORRIDOR_CENTROID.items():
+                        d = _haversine_deg(lat, lon, clat, clon)
+                        if d < best_d:
+                            best_c, best_d = c, d
+                    if best_c and best_d <= 12.0:
+                        counts[best_c] += 1
 
     out: dict[str, dict[str, Any]] = {}
     for c, n in counts.items():
         baseline = CORRIDOR_VESSEL_BASELINE.get(c, 10.0)
         # Anomaly: deviation above baseline OR a congestion clustering signal.
         deviation = (n - baseline) / max(baseline, 1.0)
-        out[c] = {"signal": _clip01(0.3 + max(0.0, deviation)), "count": n}
+        out[c] = {"signal": _clip01(0.3 + max(0.0, deviation)), "count": n, "source": source}
     return out
 
 
