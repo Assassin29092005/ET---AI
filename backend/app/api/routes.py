@@ -109,6 +109,168 @@ SCORE_CORRIDOR_TO_ENGINE: dict[str, str] = {
     "suez": "Suez or Cape",
 }
 
+# Reverse map: sourcing-engine corridor label → score-corridor key. Lets the
+# sourcing endpoint look up live twin state for each supplier's route.
+ENGINE_TO_SCORE_CORRIDOR: dict[str, str] = {
+    "Strait of Hormuz": "hormuz",
+    "Bab el-Mandeb": "bab_el_mandeb",
+    "Strait of Malacca": "malacca",
+    "South China Sea": "south_china_sea",
+    "Cape of Good Hope": "cape_of_good_hope",
+    "Suez or Cape": "suez",
+    "Land": "hormuz",  # land routes use their nearest maritime chokepoint proxy
+}
+
+# Twin snapshot the sourcing endpoint reads (also served by /digital-twin/state).
+# Kept module-level so both endpoints share one source of truth.
+TWIN_AVG_DELAY_HOURS: dict[str, float] = {
+    "hormuz": 6,
+    "bab_el_mandeb": 26,
+    "malacca": 2,
+    "south_china_sea": 9,
+    "cape_of_good_hope": 0,
+    "suez": 4,
+}
+TWIN_VESSEL_COUNT: dict[str, int] = {
+    "hormuz": 25,
+    "bab_el_mandeb": 12,
+    "malacca": 18,
+    "south_china_sea": 10,
+    "cape_of_good_hope": 5,
+    "suez": 4,
+}
+TWIN_CORRIDOR_CAPACITY: dict[str, int] = {
+    "hormuz": 30,
+    "bab_el_mandeb": 15,
+    "malacca": 22,
+    "south_china_sea": 14,
+    "cape_of_good_hope": 12,
+    "suez": 8,
+}
+
+
+# --- Spot pricing --------------------------------------------------------
+# Maps a commodity to the fixture price series and its native unit. When the
+# series is available we use its latest value; otherwise we fall back to the
+# planning base price. This is what turns "risk-premium on a hardcoded base"
+# into a genuine spot-linked price.
+_COMMODITY_PRICE_SERIES: dict[str, tuple[str, str]] = {
+    "crude_oil": ("brent_crude_usd", "USD/bbl"),
+    "lng": ("lng_jkm_usd", "USD/MMBtu"),
+    "coking_coal": ("coking_coal_usd", "USD/t"),
+    "lithium": ("lithium_carbonate_cny", "CNY/t"),
+    "rare_earths": ("neodymium_oxide_cny", "CNY/t"),
+}
+_BASE_PRICE: dict[str, float] = {
+    "crude_oil": 82.0,
+    "lng": 14.5,
+    "coking_coal": 295.0,
+    "lithium": 92.0,
+    "cobalt": 28.0,
+    "nickel": 18.0,
+    "rare_earths": 540.0,
+    "solar_pv": 0.105,
+    "uranium": 88.0,
+    "lpg": 660.0,
+    "atf": 95.0,
+    "copper": 9500.0,
+    "graphite": 1200.0,
+    "manganese": 1800.0,
+    "polysilicon": 8.5,
+    "silver": 31.0,
+    "thermal_coal": 125.0,
+    "pgm": 980.0,
+    "rock_phosphate": 155.0,
+    "potash": 320.0,
+}
+_PRICE_UNIT: dict[str, str] = {
+    "crude_oil": "USD/bbl",
+    "lng": "USD/MMBtu",
+    "coking_coal": "USD/t",
+    "lithium": "CNY/t",
+    "rare_earths": "CNY/t",
+    "cobalt": "USD/kg",
+    "nickel": "USD/kg",
+    "solar_pv": "USD/W",
+    "uranium": "USD/lb",
+    "lpg": "USD/t",
+    "atf": "USD/bbl",
+    "copper": "USD/t",
+    "graphite": "USD/t",
+    "manganese": "USD/t",
+    "polysilicon": "USD/kg",
+    "silver": "USD/oz",
+    "thermal_coal": "USD/t",
+    "pgm": "USD/oz",
+    "rock_phosphate": "USD/t",
+    "potash": "USD/t",
+}
+
+
+def _spot_price(commodity: str) -> tuple[float, str, bool]:
+    """Return (price, unit, is_spot). Prefers the latest fixture-series value."""
+    base = _BASE_PRICE.get(commodity, 100.0)
+    unit = _PRICE_UNIT.get(commodity, "USD")
+    key_unit = _COMMODITY_PRICE_SERIES.get(commodity)
+    if key_unit is None:
+        return base, unit, False
+    prices = _load_fixture("commodity_prices.json") or {}
+    series = prices.get(key_unit[0]) if isinstance(prices, dict) else None
+    if isinstance(series, list) and series:
+        last = series[-1]
+        if isinstance(last, dict) and "value" in last:
+            return float(last["value"]), key_unit[1], True
+    return base, key_unit[1], False
+
+
+# --- Refinery grade compatibility ---------------------------------------
+# Coarse mapping: dominant crude grade family exported by each source country,
+# aligned to the grade labels in refineries.json (sweet light / sour medium /
+# heavy sour / sour heavy). This is an indicative planner-level tag — real
+# nomination requires the receiving refinery's assay & config sign-off.
+_COUNTRY_CRUDE_GRADE: dict[str, str] = {
+    "Saudi Arabia": "sour medium",
+    "Iraq": "heavy sour",
+    "UAE": "sour medium",
+    "Kuwait": "heavy sour",
+    "Iran": "heavy sour",
+    "Qatar": "sour medium",
+    "Oman": "sour medium",
+    "Russia": "sour medium",  # Urals / ESPO blend, planner average
+    "Nigeria": "sweet light",
+    "Angola": "sweet light",
+    "USA": "sweet light",  # WTI Midland representative
+    "Brazil": "sweet light",
+    "Venezuela": "heavy sour",
+    "Mexico": "heavy sour",
+}
+
+
+def _grade_compat(country: str, commodity: str) -> tuple[str, str]:
+    """Return (flag, note) for a coarse refinery-grade compatibility check.
+    Only crude oil is meaningfully graded here; other commodities return 'n/a'."""
+    if commodity != "crude_oil":
+        return "n/a", ""
+    grade = _COUNTRY_CRUDE_GRADE.get(country)
+    if grade is None:
+        return "unknown", "Grade family not tagged; confirm with the receiving refinery."
+    refs = _load_fixture("refineries.json") or []
+    if not isinstance(refs, list):
+        return "unknown", "Grade data unavailable; confirm with the receiving refinery."
+    accepting = [
+        r.get("name")
+        for r in refs
+        if isinstance(r, dict) and grade in (r.get("primary_crude_grades") or [])
+    ]
+    if not accepting:
+        return "mismatch", (
+            f"Grade '{grade}' is not listed as a primary slate at any modelled Indian "
+            "refinery — nomination would need assay + config confirmation."
+        )
+    head = ", ".join(accepting[:3])
+    tail = "" if len(accepting) <= 3 else f" (+{len(accepting) - 3} more)"
+    return "match", f"'{grade}' matches primary slate at {head}{tail}."
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1081,22 +1243,8 @@ async def twin_state() -> dict:
         "cape_of_good_hope": 5.3,
         "suez": 7.8,
     }
-    delays = {
-        "hormuz": 6,
-        "bab_el_mandeb": 26,
-        "malacca": 2,
-        "south_china_sea": 9,
-        "cape_of_good_hope": 0,
-        "suez": 4,
-    }
-    per_corridor_vessels = {
-        "hormuz": 25,
-        "bab_el_mandeb": 12,
-        "malacca": 18,
-        "south_china_sea": 10,
-        "cape_of_good_hope": 5,
-        "suez": 4,
-    }
+    delays = TWIN_AVG_DELAY_HOURS
+    per_corridor_vessels = TWIN_VESSEL_COUNT
 
     corridors_out = []
     for corridor in ["hormuz", "bab_el_mandeb", "malacca", "south_china_sea", "cape_of_good_hope", "suez"]:
@@ -1455,28 +1603,8 @@ async def sourcing(
         SCORE_CORRIDOR_TO_ENGINE.get(disruptedCorridor) if disruptedCorridor else None
     )
 
-    base_price = {
-        "crude_oil": 82.0,
-        "lng": 14.5,
-        "coking_coal": 295.0,
-        "lithium": 92.0,
-        "cobalt": 28.0,
-        "nickel": 18.0,
-        "rare_earths": 540.0,
-        "solar_pv": 0.105,
-        "uranium": 88.0,
-        "lpg": 660.0,
-        "atf": 95.0,
-        "copper": 9500.0,
-        "graphite": 1200.0,
-        "manganese": 1800.0,
-        "polysilicon": 8.5,
-        "silver": 31.0,
-        "thermal_coal": 125.0,
-        "pgm": 980.0,
-        "rock_phosphate": 155.0,
-        "potash": 320.0,
-    }.get(commodity, 100.0)
+    # Spot-linked price base (falls back to planning base if no series exists).
+    spot_price, price_unit, is_spot = _spot_price(commodity)
 
     # First pass: classify each supplier's route status and total the share of
     # the suppliers still open, so recommended volume can be re-normalised onto
@@ -1501,14 +1629,41 @@ async def sourcing(
         # The engine reports current_risk and historical_share as [0,1] fractions;
         # surface them on the [0,100] / percentage scale the UI uses.
         risk = float(getattr(opt, "current_risk", 0.30)) * 100.0
-        # Engine carries a lead-time *score* (1 = fastest), not days — derive a
-        # believable day count from it instead of a constant.
+        # Engine carries a lead-time *score* (1 = fastest); base days from it,
+        # then add live port-congestion delay from the twin.
         lead_score = float(getattr(opt, "lead_time_score", 0.5))
-        lead = int(round(10 + (1.0 - lead_score) * 55))
+        base_lead = 10 + (1.0 - lead_score) * 55
         rationale = getattr(opt, "rationale", "")
         opt_corridor = str(getattr(opt, "primary_corridor", "")) or CORRIDOR_LABEL.get(
             CORRIDOR_FOR_COMMODITY.get(commodity, "hormuz"), "Strait of Hormuz"
         )
+        score_corridor = ENGINE_TO_SCORE_CORRIDOR.get(opt_corridor, "hormuz")
+
+        # Port congestion: convert queue hours to added lead-time days.
+        congestion_hours = float(TWIN_AVG_DELAY_HOURS.get(score_corridor, 0))
+        congestion_days = round(congestion_hours / 24.0, 1)
+        lead = int(round(base_lead + congestion_days))
+
+        # Tanker availability: utilisation vs corridor capacity → [0, 1] where 1 is
+        # tight (few spare vessels). Feeds a small freight uplift on the price.
+        vessels = TWIN_VESSEL_COUNT.get(score_corridor, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(score_corridor, 1) or 1
+        tanker_util = max(0.0, min(1.0, vessels / capacity))
+        if tanker_util < 0.5:
+            tanker_flag = "ample"
+        elif tanker_util < 0.85:
+            tanker_flag = "tight"
+        else:
+            tanker_flag = "constrained"
+
+        # Price = spot × (risk premium + freight premium tied to tanker tightness).
+        # Freight premium is capped so it doesn't dominate the score.
+        risk_premium = (risk - 30) / 100.0
+        freight_premium = 0.06 * tanker_util + (congestion_hours / 24.0) * 0.005
+        landed_price = round(spot_price * (1.0 + risk_premium + freight_premium), 2)
+
+        grade_flag, grade_note = _grade_compat(country, commodity)
+
         import_share_pct = round(share_frac * 100.0, 1)
         if status == "closed":
             volume = 0.0
@@ -1523,11 +1678,20 @@ async def sourcing(
             "commodity": commodity,
             "importSharePct": import_share_pct,
             "volumeMb": volume,
-            "priceUsd": round(base_price * (1.0 + (risk - 30) / 100.0), 2),
+            "priceUsd": landed_price,
+            "spotPriceUsd": round(spot_price, 2),
+            "priceUnit": price_unit,
+            "priceSource": "spot" if is_spot else "planning",
             "leadTimeDays": lead,
+            "portDelayDays": congestion_days,
             "routeCorridor": opt_corridor,
             "routeStatus": status,
             "routeRiskScore": round(risk, 1),
+            "tankerAvailability": tanker_flag,
+            "tankerUtilisation": round(tanker_util, 2),
+            "vesselsInCorridor": vessels,
+            "gradeCompat": grade_flag,
+            "gradeNote": grade_note,
             "sanctionsCheck": "flag" if risk > 60 else "clear",
             "carbonIntensity": round(8.0 + (rank * 0.4), 2),
             "notes": rationale,

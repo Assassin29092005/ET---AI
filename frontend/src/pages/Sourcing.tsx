@@ -86,6 +86,19 @@ const MATURITY_PILL: Record<string, string> = {
   nascent: 'border-slate-500/40 text-slate-300',
 };
 
+const TANKER_PILL: Record<string, string> = {
+  ample: 'border-emerald-500/40 text-emerald-300',
+  tight: 'border-amber-500/40 text-amber-300',
+  constrained: 'border-red-500/50 text-red-300',
+};
+
+const GRADE_PILL: Record<string, string> = {
+  match: 'border-emerald-500/40 text-emerald-300',
+  mismatch: 'border-red-500/50 text-red-300',
+  unknown: 'border-slate-500/40 text-slate-300',
+  'n/a': 'border-slate-500/40 text-slate-500',
+};
+
 export default function Sourcing() {
   const [commodity, setCommodity] = useState<Commodity>('crude_oil');
   const [disrupted, setDisrupted] = useState<Corridor | ''>('');
@@ -347,10 +360,12 @@ export default function Sourcing() {
                   <th className="px-4 py-2 text-left">Supplier / country</th>
                   <th className="px-4 py-2 text-right">Import share</th>
                   <th className="px-4 py-2 text-right">Vol {commodityUnitShort(commodity)}</th>
-                  <th className="px-4 py-2 text-right">Price USD</th>
+                  <th className="px-4 py-2 text-right">Landed price</th>
                   <th className="px-4 py-2 text-right">Lead time</th>
                   <th className="px-4 py-2 text-left">Corridor / status</th>
                   <th className="px-4 py-2 text-right">Risk</th>
+                  <th className="px-4 py-2 text-left">Tanker</th>
+                  <th className="px-4 py-2 text-left">Grade</th>
                   <th className="px-4 py-2 text-left">Sanctions</th>
                 </tr>
               </thead>
@@ -376,9 +391,22 @@ export default function Sourcing() {
                         {o.volumeMb > 0 ? fmtNumber(o.volumeMb, 1) : '—'}
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-slate-300">
-                        ${o.priceUsd.toFixed(2)}
+                        <div>{o.priceUsd.toFixed(2)}</div>
+                        <div className="text-[10px] text-slate-500">
+                          {o.priceUnit ?? 'USD'}
+                          {o.priceSource === 'spot' && o.spotPriceUsd
+                            ? ` · spot ${o.spotPriceUsd.toFixed(2)}`
+                            : ' · planning'}
+                        </div>
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">{o.leadTimeDays} d</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">
+                        <div>{o.leadTimeDays} d</div>
+                        {o.portDelayDays != null && o.portDelayDays > 0 && (
+                          <div className="text-[10px] text-amber-300/80">
+                            +{o.portDelayDays.toFixed(1)}d port
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2 text-xs text-slate-400">
                         <div>{o.routeCorridor}</div>
                         {o.routeStatus !== 'open' && (
@@ -391,6 +419,38 @@ export default function Sourcing() {
                       </td>
                       <td className="px-4 py-2 text-right tabular-nums text-slate-300">
                         {o.routeRiskScore.toFixed(0)}
+                      </td>
+                      <td className="px-4 py-2">
+                        {o.tankerAvailability ? (
+                          <span
+                            className={`inline-block rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                              TANKER_PILL[o.tankerAvailability] ?? 'border-slate-600 text-slate-400'
+                            }`}
+                            title={
+                              o.vesselsInCorridor != null
+                                ? `${o.vesselsInCorridor} vessels in corridor · util ${(o.tankerUtilisation ?? 0).toFixed(2)}`
+                                : undefined
+                            }
+                          >
+                            {o.tankerAvailability}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2">
+                        {o.gradeCompat && o.gradeCompat !== 'n/a' ? (
+                          <span
+                            className={`inline-block rounded-sm border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                              GRADE_PILL[o.gradeCompat] ?? 'border-slate-600 text-slate-400'
+                            }`}
+                            title={o.gradeNote || undefined}
+                          >
+                            {o.gradeCompat}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 text-[11px]">n/a</span>
+                        )}
                       </td>
                       <td className="px-4 py-2">
                         <span
@@ -412,8 +472,9 @@ export default function Sourcing() {
             </table>
           )}
           <div className="border-t border-slate-800 px-5 py-2 text-[11px] text-slate-500">
-            Risk is the live corridor composite (matches the dashboard); a simulated cutoff forces
-            the corridor to 100 and reallocates volume to open routes.
+            Price is spot × (risk premium + freight premium tied to tanker tightness). Lead-time
+            includes live port-congestion delay from the twin. Grade compatibility is a coarse
+            planner tag against Indian refinery slates — nomination still needs assay + config sign-off.
           </div>
         </section>
       </div>

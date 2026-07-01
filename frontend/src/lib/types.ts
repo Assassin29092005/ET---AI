@@ -109,6 +109,9 @@ export interface ScenarioResult {
 
 export type RouteStatus = 'open' | 'disrupted' | 'closed';
 
+export type TankerAvailability = 'ample' | 'tight' | 'constrained';
+export type GradeCompat = 'match' | 'mismatch' | 'unknown' | 'n/a';
+
 export interface SourcingOption {
   rank: number;
   supplier: string;
@@ -117,10 +120,19 @@ export interface SourcingOption {
   importSharePct: number;
   volumeMb: number;
   priceUsd: number;
+  spotPriceUsd?: number;
+  priceUnit?: string;
+  priceSource?: 'spot' | 'planning';
   leadTimeDays: number;
+  portDelayDays?: number;
   routeCorridor: string;
   routeStatus: RouteStatus;
   routeRiskScore: number;
+  tankerAvailability?: TankerAvailability;
+  tankerUtilisation?: number;
+  vesselsInCorridor?: number;
+  gradeCompat?: GradeCompat;
+  gradeNote?: string;
   sanctionsCheck: 'clear' | 'flag' | 'block';
   carbonIntensity: number;
   notes: string;
