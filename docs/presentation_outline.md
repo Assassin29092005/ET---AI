@@ -43,7 +43,7 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 ## Slide 4 — Our solution
 
 - A single intelligence layer across all India's strategic imports.
-- Five maritime corridors monitored continuously: Hormuz, Bab el-Mandeb, Malacca, South China Sea, Cape of Good Hope.
+- Six maritime corridors monitored continuously: Hormuz, Bab el-Mandeb, Malacca, South China Sea, Cape of Good Hope, Suez.
 - Six commodity classes: crude, LNG, coking coal, critical minerals, solar PV, uranium.
 - Architecture diagram inline (slide image: architecture_diagram.md mermaid render).
 - Signal in, decision out, in seconds — not weeks.
@@ -55,10 +55,10 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 ## Slide 5 — How risk is scored
 
 - Composite 0-100 score per corridor x commodity.
-- Inputs: geopolitical events (40%) + chokepoint anomalies (25%) + sanctions (15%) + market volatility (20%).
-- Weighted ensemble, tunable in config.
-- Tiers: low under 30, elevated 30-55, high 55-75, critical above 75.
-- Updated every 15 minutes.
+- Five inputs: geopolitical events (35%) + AIS chokepoint anomalies (20%) + sanctions (15%) + market volatility (15%) + news sentiment (15%).
+- Weighted ensemble; weights are named constants, documented in the assumption ledger.
+- Tiers: low under 30, elevated 30-55, high 55-75, critical above 75. Plus a 14-day disruption probability per corridor.
+- Re-scored every 10 minutes by a background scheduler; changes push to the dashboard over WebSocket and persist to a score-history archive.
 
 *Speaker note: judges with quantitative backgrounds will probe the formula. Walk through one example component live if asked.*
 
@@ -87,6 +87,8 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 - Decision variables: daily drawdown and replenishment per SPR site (Vizag, Mangalore, Padur).
 - Objective: minimise integrated price-impact.
 - Constraints: reserve balance, injection rate caps, non-negativity, supply balance.
+- Uncertainty shown, not hidden: 200-sample Monte Carlo p10-p90 band on the supply gap, with tail-risk probabilities.
+- Every solve is persisted to an audit history; a Gemini decision brief turns the plan into policymaker language.
 - Outcome: closes McKinsey's 47-day stabilisation gap to roughly 12 days.
 
 *Speaker note: the formulation slide. Don't read the constraints — let the visual speak.*
@@ -111,8 +113,10 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 |--------|-------------|---------|
 | GDELT | All | 15 min |
 | AISStream | Crude, LNG, coal, container | Live WebSocket |
-| OFAC / UN / EU | All | Daily |
+| OFAC SDN | All | Daily |
 | EIA + Alpha Vantage | Crude, gas, metals | Daily |
+| NewsAPI | All (corridor headlines) | Continuous (free tier) |
+| VEDAS (ISRO) / PNGRB | Indian pipeline network | Static + live layer |
 | PPAC India | Crude, LPG | Monthly |
 | GIIGNL | LNG | Annual |
 | USGS / Ministry of Mines | Critical minerals | Annual |
@@ -129,11 +133,11 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 ## Slide 10 — Roadmap and impact
 
 - Next 90 days:
-  - Live API integration end-to-end (flag-gated already).
+  - Harden live ingestion (already wired and flag-gated: GDELT, AISStream, EIA, NewsAPI, live FX).
   - Oil ministry mentor partnership for refinery chemistry on procurement module.
   - NPCIL pilot for uranium scenarios.
-  - GIIGNL data licensing for live LNG flow.
-- Scaling architecture: corridors and commodities are configuration, not code.
+  - GIIGNL data licensing for live LNG flow; registered VEDAS endpoint for live pipeline layers.
+- Scaling architecture: corridors, commodities and scenario parameters are data tables + fixtures, not code paths.
 - Impact: turns a reactive crisis response into a managed, anticipatory process.
 - Closing line: "Five supply chains. One intelligence layer. Zero proprietary data."
 
@@ -144,8 +148,9 @@ For ET AI Hackathon 2026, Problem Statement 2. Each slide here is one bullet per
 ## Backup slide — Q&A talking points
 
 - Why not just buy a procurement SaaS? Because every existing tool is single-commodity and reactive.
-- How does this scale to other countries? Corridor list and commodity weights are YAML. Indonesia, Philippines, Bangladesh have similar import-dependence profiles.
+- How does this scale to other countries? Corridor centroids, baselines and commodity weights are data tables; Indonesia, Philippines, Bangladesh have similar import-dependence profiles.
 - What's the latency target? Sub-2-second response with fixtures; sub-6-second with live APIs. LLM call is the slow step.
 - How do you handle AIS spoofing near Iran? We acknowledge it openly. Vessel attribution is not 100% reliable in disputed waters and the system surfaces that uncertainty.
-- Can this replace the human procurement director? No. It's a triage and recommendation layer. Procurement directors still own the decision.
-- What's the cost to run? Anthropic API + DigitalOcean dyno: under $200/month for a single-tenant deployment at hackathon scale.
+- How do you show model uncertainty? The SPR gap forecast carries a 200-sample Monte Carlo p10-p90 band, and scores carry a 14-day disruption probability — point estimates never stand alone.
+- Can this replace the human procurement director? No. It's a triage and recommendation layer. Procurement directors still own the decision. Every scenario run and SPR solve is logged for audit.
+- What's the cost to run? Gemini API (flash tier) + one small VM: well under $50/month for a single-tenant deployment at hackathon scale; the demo itself uses under $1 of LLM quota.

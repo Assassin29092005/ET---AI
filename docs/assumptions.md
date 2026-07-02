@@ -8,7 +8,7 @@ Hackathon judges will probe modeling assumptions before accepting any decision-s
 
 ## 2. Commodity baselines
 
-All baselines reflect FY24-FY25 reporting unless noted. Values are stored in `data/fixtures/commodity_baselines.json` and surfaced read-only in the UI.
+All baselines reflect FY24-FY25 reporting unless noted. Calibration values live in the `BASELINE` dict in `backend/app/engines/scenarios.py`. At startup, `ingest/baselines.py` refreshes the *data* anchors (Brent, Henry Hub, copper, USD/INR, retail fuel) from live feeds when reachable; model elasticities are never touched. Operators can inspect and override key baselines on the Baselines page (`/baselines`), and overrides persist in SQLite across restarts.
 
 ### 2.1 Crude oil
 
@@ -85,16 +85,18 @@ risk = w_geo * geo_signal
      + w_ais * ais_anomaly
      + w_sanctions * sanctions_signal
      + w_price * price_vol
+     + w_news * news_signal
 ```
 
-Default weights (defined in `backend/config/weights.yaml`, hot-reloadable):
+Default weights (defined as constants in `backend/app/engines/risk_score.py`; the live path in `live_scores.py` scores six corridors — Hormuz, Bab el-Mandeb, Malacca, South China Sea, Cape of Good Hope, Suez):
 
 | Component | Weight | Driver |
 |---|---|---|
-| `geo_signal` | 0.40 | GDELT event tone + count for corridor geography |
-| `ais_anomaly` | 0.25 | Vessel drift, dark gaps, rerouting vs 90-day baseline |
-| `sanctions_signal` | 0.15 | New OFAC/UN/EU listings touching counterparties on the route |
-| `price_vol` | 0.20 | 10-day realized vol of front-month benchmark |
+| `geo_signal` | 0.35 | GDELT event tone + count for corridor geography |
+| `ais_anomaly` | 0.20 | Vessel-count deviation vs corridor baseline (AISStream live or fixture) |
+| `sanctions_signal` | 0.15 | OFAC SDN listings touching counterparties on the route |
+| `price_vol` | 0.15 | Recent realized vol of the corridor's primary benchmark |
+| `news_signal` | 0.15 | Negative share of last-24h corridor headlines (NewsAPI → GDELT DOC fallback) |
 
 Each component is clipped to [0, 1] before the weighted sum, so the composite is bounded in [0, 100] after multiplying by 100.
 
@@ -111,63 +113,78 @@ Threshold bands:
 
 ## 4. Scenario parameters
 
-Each scenario is defined in the `SCENARIOS` dict in `backend/app/engines/scenarios.py` (price/GDP/SPR elasticities) and is referenced from the UI scenario panel. The served projection is computed in `_project_impact()` in `backend/app/api/routes.py`, which reads those same documented elasticities. Parameters listed here are the defaults; users can override intensity and duration before running.
+Each scenario is defined in the `SCENARIOS` dict in `backend/app/engines/scenarios.py` (price/GDP/SPR elasticities). The served projection is computed by `project_scenario()` in the same module — the API route's `_project_impact()` is a thin wrapper over it — so the app and this ledger read the same documented elasticities. Parameters listed here are the defaults; users can override intensity and duration before running.
 
-### 4.1 Hormuz partial closure
+Price elasticities below are the shock at **full intensity** (i = 1.0); the served uplift scales with the intensity slider (e.g. Hormuz at i = 0.5 → Brent +11.6%).
 
-| Parameter | Default |
-|---|---|
-| Throughput reduction | 50% |
-| Duration | 14 days |
-| Brent shock | +30% |
-| Affected commodities | Crude, LNG (Qatar) |
-
-### 4.2 OPEC+ emergency cut
+### 4.1 Hormuz partial closure (`hormuz_partial_closure`)
 
 | Parameter | Default |
 |---|---|
-| Supply removed | 1.0 MMb/d |
-| Brent shock | +15% |
-| Duration | 90 days |
+| Default intensity / duration | 0.40 / 21 days |
+| Crude price elasticity (at full closure) | 0.55, on Hormuz volume share 0.42 → Brent ≈ +23% |
+| LNG price elasticity | 0.40, on Qatar-route share 0.48 |
+| GDP transmission | 18 bps per +$10 Brent |
+| SPR drawdown share of gap | 0.65 |
 
-### 4.3 Red Sea full suspension
-
-| Parameter | Default |
-|---|---|
-| Reroute | Cape of Good Hope |
-| Added transit | +18 days |
-| LNG price | +12% |
-| Container freight | +25% |
-
-### 4.4 Australian coking coal disruption
+### 4.2 OPEC+ emergency cut (`opec_emergency_cut`)
 
 | Parameter | Default |
 |---|---|
-| Trigger | Cyclone or port strike, Queensland |
-| Queensland export shock | -30% |
-| Coking coal price | +25% |
-| Downstream effect | Steel mill margin compression |
+| Default intensity / duration | 0.50 / 60 days |
+| Global supply removed at full intensity | 3.0 MMb/d |
+| Crude price elasticity | 0.30 |
+| SPR drawdown share | 0.50 |
 
-### 4.5 China rare earth export curbs
+### 4.3 Red Sea full suspension (`red_sea_suspension`)
 
 | Parameter | Default |
 |---|---|
-| NdFeB magnet supply | -50% |
+| Default intensity / duration | 0.70 / 45 days |
+| Reroute | Cape of Good Hope, +14 days transit |
+| Container freight at full intensity | +145% |
+| Crude / LNG price elasticity | 0.18 / 0.22 |
+| SPR drawdown share | 0.20 |
+
+### 4.4 Australian coking coal disruption (`australia_coking_coal`)
+
+| Parameter | Default |
+|---|---|
+| Default intensity / duration | 0.55 / 30 days |
+| Trigger | Cyclone, rail outage or export curb, Queensland |
+| Coking coal price elasticity | 0.65, on Australia share 0.70 |
+| Steel output drag | 4.5 bps per +10% coal price |
+| Mill stockpile buffer | 22 days |
+
+### 4.5 China rare earth export curbs (`china_rare_earth_curbs`)
+
+| Parameter | Default |
+|---|---|
+| Default intensity / duration | 0.60 / 120 days |
+| REE price elasticity | 1.10, on China share 0.90 |
+| EV battery pass-through | 6% |
+| GDP transmission | 1.2 bps per pp of EV-capex drag |
+| Stockpile buffer | 35 days |
 | Affected sectors | EV traction motors, wind turbines, defence |
 
-### 4.6 China solar module export tariff retaliation
+### 4.6 China solar module export tariff (`china_solar_export_tariff`)
 
 | Parameter | Default |
 |---|---|
-| Project IRR delta | -200 bps |
-| BCD effectiveness short-term | low |
+| Default intensity / duration | 0.45 / 180 days |
+| Module price elasticity | 0.35, on China module share 0.80 |
+| LCOE uplift | 3.8% per +10% module price |
+| Renewable capex drag | 2.5 bps |
+| Stockpile buffer | 60 days |
 
-### 4.7 Kazakhstan uranium disruption
+### 4.7 Kazakhstan uranium disruption (`kazakhstan_uranium_disruption`)
 
 | Parameter | Default |
 |---|---|
-| NPCIL fuel buffer | ~6 months |
-| Alternative path | Cameco (Canada) contracting |
+| Default intensity / duration | 0.50 / 90 days |
+| Uranium price elasticity | 0.45, on Kazakhstan share 0.40 |
+| Fuel-cycle buffer | 540 days (~18 months) — impacts are small and slow by design |
+| NPP capex drag | 0.8 bps |
 
 ### 4.8 Sector transmission (refinery run-rate & power-sector stress)
 
@@ -213,7 +230,21 @@ drawdown_t       <= max_injection_rate
 replenish_t      <= max_injection_rate
 ```
 
-Solved with PuLP CBC. `price_impact` is a piecewise-linear function of `deficit_t` calibrated from historical Brent moves during the 2019 Abqaiq strike and the 2022 Russia diversion. The calibration table lives in `backend/lp/price_impact.json`.
+Solved with PuLP CBC. `price_impact` is a piecewise-linear function of `deficit_t` calibrated from historical Brent moves during the 2019 Abqaiq strike and the 2022 Russia diversion. The calibration constants live in `backend/app/engines/spr_lp.py`.
+
+### 5.1 Monte Carlo uncertainty band
+
+`backend/app/engines/spr_uncertainty.py` wraps the supply-gap forecast in a true percentile band computed from 200 perturbed trajectories (deterministic under a seed). Perturbations and their rationale:
+
+| Input | Distribution | Why |
+|---|---|---|
+| Intensity | Normal(input, sd 0.10), clipped [0.05, 1.0] | Analyst may misjudge shock severity |
+| Crude price elasticity | Normal(doc, sd 10% of doc) | Priced-in uncertainty in the documented elasticity |
+| Crude volume share | Normal(doc, sd 5%), clipped | Refinery-import share ambiguity |
+| Exposure (kbpd) | Lognormal(input, sd 0.15 log-scale) | Slate/grade substitution; strictly positive with upside tails |
+| Shock timing | Uniform ±3 days | Peak/end timing uncertainty |
+
+Output per day: `central` = p50, `low` = p10, `high` = p90, plus aggregates (peak p50, P(gap > 500 kbpd), P(gap > 1000 kbpd)). Non-crude scenarios (rare earths, solar, uranium, coking coal) return a flat zero band — SPR is a crude-only instrument and the UI says so.
 
 ---
 
@@ -236,15 +267,16 @@ These omissions are deliberate. Judges should treat sourcing output as a shortli
 | Feed | Cadence | Lag |
 |---|---|---|
 | GDELT events | 15 min | < 30 min |
-| AIS vessel positions | live WebSocket | seconds |
+| AIS vessel positions (AISStream WebSocket) | live | seconds |
+| NewsAPI headlines | per scheduler tick (free tier: 100 req/day) | minutes |
 | OFAC SDN | daily refresh | 24 h |
-| UN / EU sanctions | daily refresh | 24 h |
-| Commodity prices (Brent, JKM, coking coal, lithium carbonate) | daily close | end of day |
+| Commodity prices (Brent, Henry Hub via EIA; metals via Alpha Vantage) | daily close | end of day |
+| Composite score refresh (scheduler) | 10 min | — |
 | PPAC monthly bulletin | monthly | 30-45 day lag |
 | GIIGNL World LNG Report | annual | up to 12 months |
 | USGS Mineral Commodity Summaries | annual | up to 12 months |
 
-The UI surfaces a "Data freshness" badge per feed so users see which inputs are stale before relying on them.
+Freshness is surfaced in the UI via `asOf` timestamps on every panel and live/override provenance on the Baselines page, so users see which inputs are stale before relying on them.
 
 ---
 
@@ -265,4 +297,4 @@ For both users and judges:
 - The composite score is a triage signal, not a forecast. It says "look here today," not "this will close."
 - An "elevated" reading does not predict a closure. It tells procurement and logistics teams to review the alternative options the system has surfaced.
 - "Critical" should trigger a human decision review, not an automated action.
-- Backtests on 2019 Abqaiq, 2022 Russia diversion, and 2023-24 Red Sea Houthi attacks are bundled in `backend/backtests/` so reviewers can judge calibration on their own.
+- Backtest events (June 2025 Hormuz escalation, Dec 2024 Red Sea, Q4 2024 Queensland coal) are defined in `backend/app/api/routes.py` and replayable day-by-day at `GET /api/backtest/{event_id}/replay` and on the Backtest page, so reviewers can judge calibration on their own.

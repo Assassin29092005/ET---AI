@@ -4,318 +4,355 @@
 
 This system is a multi-commodity, signal-to-decision pipeline for India's strategic
 energy and critical-materials supply chain. It ingests heterogeneous public signals
-(geopolitical events, vessel movements, sanctions lists, commodity prices, regulatory
-bulletins), normalizes them through per-commodity adapters, and computes a per-corridor
-by per-commodity risk matrix. Scenario simulations, strategic-reserve linear programs,
-and alternate-sourcing rankings are layered on top, and an LLM narrative engine
-translates quantitative output into briefings, scenario explanations, and
-recommendation drafts surfaced through a digital-twin dashboard.
+(geopolitical events, vessel movements, sanctions lists, commodity prices, news
+headlines), normalizes them through per-source adapters, and computes a per-corridor
+by per-commodity risk matrix that is re-scored continuously by a background scheduler.
+Scenario simulations (single and compound), a strategic-reserve linear program with
+Monte Carlo uncertainty, an impact-cascade dependency graph, and alternate-sourcing
+rankings are layered on top. A Gemini narrative engine translates quantitative output
+into briefings, scenario explanations, and recommendation drafts surfaced through a
+digital-twin dashboard. Operator overrides and every scenario/SPR run are persisted
+to SQLite for audit and replay.
 
 ## 2. High-Level Diagram
 
 ```
 +------------------------------------------------------------------------------+
-|                              SIGNAL LAYER                                    |
-|  GDELT   AISStream   OFAC/UN/EU   EIA/AV   PPAC   GIIGNL   USGS   MNRE       |
+|                              SIGNAL LAYER                                     |
+|  GDELT   AISStream   OFAC SDN   EIA/AlphaVantage   NewsAPI   VEDAS(ISRO)      |
+|  Frankfurter FX   goodreturns pump prices   PPAC   GIIGNL   USGS   MNRE       |
 +------+--------+---------+-----------+--------+--------+--------+-------------+
        |        |         |           |        |        |        |
        v        v         v           v        v        v        v
 +------------------------------------------------------------------------------+
-|                  PER-COMMODITY INGESTION ADAPTERS                            |
-|   crude_oil   lng   coking_coal   crit_minerals   solar_pv   uranium         |
+|              INGESTION ADAPTERS  (backend/app/ingest, 13 modules)             |
+|  gdelt  ais  ais_stream  sanctions  commodity_prices  news  baselines         |
+|  pump_prices  vedas  lng  coal  minerals  solar     [fixture fallback each]   |
 +------+-------------------+-------------------+--------------+----------------+
        |                   |                   |              |
        v                   v                   v              v
 +------------------------------------------------------------------------------+
-|                       RISK SCORING ENGINE                                    |
-|     Matrix: corridors x commodities -> RiskScore [0..100]                    |
+|                    RISK SCORING (engines/risk_score + live_scores)            |
+|   6 corridors x 5 signals -> composite 0-100 + tier + P(disruption, 14d)      |
+|   scheduler.py re-scores every 10 min -> SQLite history -> WS push            |
 +------+-------------------+-------------------+--------------+----------------+
        |                   |                   |              |
        v                   v                   v              v
-+----------------+   +------------------+   +------------------------------+
-| Scenario       |   | SPR / Strategic  |   | Sourcing Intelligence        |
-| Modeller       |   | Reserves LP      |   | (alternate suppliers, ports) |
-+-------+--------+   +---------+--------+   +---------------+--------------+
-        |                      |                            |
-        +----------+-----------+-------------+--------------+
-                   |                         |
-                   v                         v
-        +----------------------+   +---------------------------+
-        | LLM Narrative Layer  |   | API Layer (FastAPI)       |
-        | (Claude Opus/Haiku)  |   | REST + WS                 |
-        +----------+-----------+   +-------------+-------------+
-                   |                             |
-                   +-------------+---------------+
++----------------+  +------------------+  +----------------+  +----------------+
+| Scenario       |  | SPR LP (PuLP CBC)|  | Sourcing intel |  | Impact cascade |
+| modeller (7,   |  | + Monte Carlo    |  | (alternates +  |  | (dependency-   |
+| single or      |  | uncertainty band |  | substitution)  |  | graph BFS)     |
+| compound)      |  +---------+--------+  +-------+--------+  +-------+--------+
++-------+--------+            |                   |                   |
+        +----------+----------+---------+---------+---------+---------+
+                   |                    |
+                   v                    v
+        +----------------------+  +---------------------------+
+        | LLM Narrative Layer  |  | API Layer (FastAPI)       |
+        | Gemini 2.5 flash /   |  | 34 REST routes + /ws/feed |
+        | flash-lite, cached,  |  | persistence.py (SQLite)   |
+        | fixture fallback     |  | scheduler.py (10-min loop)|
+        +----------+-----------+  +-------------+-------------+
+                   |                            |
+                   +-------------+--------------+
                                  v
-                 +----------------------------------+
-                 |        DECISION DASHBOARD        |
-                 |  Leaflet twin | Narrative feed   |
-                 |  Scenario library | Charts       |
-                 +----------------------------------+
+                 +-----------------------------------+
+                 |        DECISION DASHBOARD         |
+                 |  12 pages: twin map | scenarios   |
+                 |  compound | cascade | SPR | ...   |
+                 +-----------------------------------+
 ```
 
 ## 3. Component Responsibilities
 
-### 3.1 Signal Ingestion
+### 3.1 Signal Ingestion (`backend/app/ingest/`)
 
-- `gdelt_poller` — pulls 15-minute GDELT GKG slices, filters CAMEO event codes for
-  conflict, port closure, sanctions, embargoes; geocodes to corridor polygons.
-- `ais_consumer` — long-running WebSocket against AISStream.io. Filters by MMSI types
-  (tanker, LNG carrier, bulker) and bounding boxes around the five tracked corridors.
-- `ofac_snapshot` — daily SDN list pull plus EU and UN consolidated lists.
-  Normalized to a single sanctions table keyed by entity name and IMO/MMSI.
-- `eia_alpha_vantage` — Brent, WTI, Henry Hub, JKM, coking coal, lithium carbonate,
-  polysilicon. Stored as time series for the volatility feature.
-- `ppac_scraper` — monthly PPAC bulletin parser (PDF + HTML) for India crude and
-  product import volumes by source country.
-- `giignl_loader` — annual LNG trade flow tables, used as baseline source-country mix.
-- `usgs_minerals` — USGS Mineral Commodity Summaries snapshot for lithium, cobalt,
-  nickel, rare earths production shares.
+Every adapter checks `settings.allow_live_ingest`; when false it serves pinned JSON
+from `data/fixtures/`, so the whole product demos offline. Live failures degrade to
+the fixture path — a dead third-party API never breaks a request.
+
+- `gdelt.py` — GDELT 2.x event pulls, filtered to conflict/shipping themes and
+  geocoded against corridor centroids; event density + tone become the geo signal.
+- `ais.py` — fixture-backed vessel snapshot + anomaly math (count deviation vs a
+  per-corridor baseline).
+- `ais_stream.py` — long-lived AISStream.io WebSocket consumer: a single socket
+  subscribed with 6 corridor bounding boxes, one rolling `deque(maxlen=200)` per
+  corridor, exponential backoff, auth-failure detection. Feeds live scoring and the
+  vessel dots on the digital twin.
+- `sanctions.py` — OFAC SDN list pull, entity matching against corridor traffic.
+- `commodity_prices.py` — price series with a three-step chain: EIA (crude, gas)
+  → Alpha Vantage (Brent/copper/natural gas) → fixture.
+- `news.py` — per-corridor headline pulls: NewsAPI → GDELT DOC API → fixture; a
+  keyword sentiment scan produces the news signal.
+- `baselines.py` — on startup, refreshes the *data* anchors the scenario model
+  projects from (Brent, Henry Hub, copper, USD/INR via Frankfurter/ECB, daily
+  import bill) and patches module globals in `routes.py` / `engines/scenarios.py`.
+  Model elasticities are deliberately never touched.
+- `pump_prices.py` — best-effort scrape of Indian retail petrol/diesel/LPG/CNG
+  (there is no free machine-readable official source).
+- `vedas.py` — Indian oil/gas trunk pipelines for the twin. Serves the
+  `pipelines.json` fixture (compiled from PNGRB/MoPNG/GAIL public maps) until a
+  registered VEDAS (ISRO SAC) endpoint is configured; the API also proxies VEDAS
+  WMS imagery tiles at `/api/vedas/tile/{product}`.
+- `lng.py`, `coal.py`, `minerals.py`, `solar.py` — fixture-backed baseline mixes
+  (GIIGNL, Ministry of Steel, USGS, MNRE) with live stubs.
 
 ### 3.2 Risk Scoring Engine
 
-Computes a `RiskScore(corridor, commodity, t)` in `[0, 100]`. Pseudo-math:
+`engines/risk_score.py` holds the weights and tier math; `engines/live_scores.py`
+aggregates the five live signal streams per corridor:
 
 ```
-event_pressure   = sum_i  w_event(type_i)   * decay(t - t_i)         for events on corridor
-vessel_anomaly   = abs(density_t - density_baseline) / sigma_baseline
-sanction_load    = count(sanctioned_entities active on corridor)
-price_signal     = ewma_vol(price_commodity, span=14d)
-import_exposure  = import_share(commodity, corridor)                 in [0,1]
+geo        = GDELT event density + tone near the corridor (24h)
+ais        = vessel-count deviation from the corridor baseline
+sanctions  = sanctioned-entity exposure on corridor traffic
+price_vol  = recent volatility of the corridor's primary commodity
+news       = negative-share of last-24h headlines matching corridor queries
 
-raw  = a*event_pressure + b*vessel_anomaly + c*sanction_load + d*price_signal
-score = 100 * sigmoid(raw) * import_exposure
+composite = 0.35*geo + 0.20*ais + 0.15*sanctions + 0.15*price_vol + 0.15*news
+score     = 100 * composite          # each component clipped to [0, 1]
 ```
 
-Coefficients `a..d` are configured per commodity in `config/risk_weights.yaml`.
-`import_exposure` gates the score: a corridor with high pressure but low dependence
-for that commodity does not raise an alarm.
+Six corridors are scored: Hormuz, Bab el-Mandeb, Malacca, South China Sea,
+Cape of Good Hope, Suez. Tiers: low <30, elevated 30-55, high 55-75, critical >75.
+A logistic mapping also emits `disruptionProbability14d` per corridor. Per-commodity
+scores scale the corridor composite by corridor-commodity relevance; per-supplier
+scores blend the supplier's primary-corridor risk with import-share concentration.
+
+`scheduler.py` re-runs this every `SCORE_REFRESH_SECONDS = 600`, appends each
+snapshot to the SQLite `score_history` table (pruned to 500 rows/corridor), and
+pushes `{kind: "score_update"}` frames to WebSocket subscribers whenever a corridor
+moves ≥ 2.0 points or changes tier.
 
 ### 3.3 Scenario Modeller
 
-Each scenario declares a primary commodity, the affected corridor(s), a duration,
-and a set of shocks (closure probability, price multiplier, sanctions overlay).
+`engines/scenarios.py` is the single source of truth. The one public entry point is
+`project_scenario(name, intensity, duration_days)` — the API route's
+`_project_impact()` is a thin wrapper. (An earlier `run_scenario()` Pydantic flow
+diverged from what the API served and has been deleted.) Each scenario translates
+intensity ∈ [0,1] and duration into price uplifts, GDP bps (routed through the
+scenario's own mechanism — import bill, steel margin, EV capex, renewable capex,
+nuclear capex), SPR runway, and per-day sector trajectories (refinery run rate,
+diesel price, power stress, GDP growth) via the `SCENARIO_SECTOR_TRANSMISSION`
+matrix. All elasticities are documented in `docs/assumptions.md`.
 
-| ID | Scenario | Primary Commodity | Corridor | Key Inputs |
-|----|----------|-------------------|----------|------------|
-| S1 | Hormuz Closure 14 d | Crude oil | Strait of Hormuz | closure_prob=0.7, brent_mult=1.35 |
-| S2 | Red Sea Houthi Escalation | Crude + Container | Bab el-Mandeb | reroute_share=0.85, lead_time_add=14d |
-| S3 | Queensland Coking Coal Strike | Coking coal | Malacca | export_drop=0.45, jkm_neutral |
-| S4 | China Rare-Earth Export Curb | Rare earths | South China Sea | export_quota=0.5, price_mult=2.0 |
-| S5 | Qatar LNG Outage | LNG | Hormuz + Suez | qatar_share_off=0.6, jkm_mult=1.6 |
-| S6 | Kazakhstan Uranium Logistics Halt | Uranium | Caspian-Black Sea | shipment_delay=60d |
-| S7 | Indonesia Nickel Export Ban Tightening | Nickel | Malacca | export_cut=0.3 |
+| ID | Scenario | Primary commodity | Corridor |
+|----|----------|-------------------|----------|
+| hormuz_partial_closure | Hormuz partial closure | Crude (+ Qatar LNG) | Hormuz |
+| opec_emergency_cut | OPEC+ emergency cut | Crude | Hormuz |
+| red_sea_suspension | Red Sea full suspension | Crude + LNG + container | Bab el-Mandeb |
+| australia_coking_coal | Australian coking coal disruption | Coking coal | Malacca |
+| china_rare_earth_curbs | China rare-earth export curbs | Rare earths | South China Sea |
+| china_solar_export_tariff | China solar export tariff | Solar PV | South China Sea |
+| kazakhstan_uranium_disruption | Kazakhstan uranium disruption | Uranium | Malacca |
 
-### 3.4 SPR and Strategic Reserves LP
+`POST /api/scenarios/compound` runs 2-4 scenarios simultaneously and combines their
+timelines; every run (single or compound) is persisted to `scenario_runs` for replay.
 
-For a horizon `H` days and reserve sites `s in S` (Vizag, Mangalore, Padur for crude;
-equivalent placeholders for LNG and minerals), decide daily withdrawal `x_{s,t}`
-and import substitution `y_{r,t}` from alternate source `r`.
+### 3.4 SPR Linear Program + Uncertainty
 
-```
-minimize    sum_t [ price_impact_t + lambda * reserve_drawdown_t ]
-subject to  sum_s x_{s,t} + sum_r y_{r,t} + baseline_supply_t >= demand_t
-            0 <= x_{s,t} <= max_withdraw_s
-            sum_t x_{s,t} <= inventory_s
-            sum_r y_{r,t} <= alt_supply_capacity_{r,t}
-            reserve_drawdown_t = sum_s x_{s,t}
-            price_impact_t = max(0, demand_t - baseline_supply_t - sum y) * elasticity
-```
+`engines/spr_lp.py` (PuLP CBC): decision variables are daily `drawdown_t` and
+`replenish_t`; the objective minimises integrated price impact of the residual
+supply gap subject to reserve balance, injection-rate caps, and non-negativity.
+Inputs are scenario-driven (the projected gap from `project_scenario`).
 
-Solved with `scipy.optimize.linprog` (HiGHS) by default; PuLP fallback for richer
-constraint sets. Output is a withdrawal schedule, residual price impact path, and a
-shadow price per site interpreted as the marginal value of additional storage.
+`engines/spr_uncertainty.py` replaces a stylized band with a true Monte Carlo
+percentile band: 200 perturbed trajectories — intensity ~ N(input, 0.10), elasticity
+~ N(doc, 10%), volume share ~ N(doc, 5%), exposure ~ lognormal(0.15), shock timing
+± 3 days — reported as p10/p50/p90 per day plus aggregates (`peakP50`,
+`probAbove500Kbpd`, `probAbove1000Kbpd`). Non-crude scenarios return a flat zero
+band: SPR is a crude-only instrument and the code says so.
+
+`POST /api/spr/brief` layers a structured policymaker brief (situation, actions,
+trade-offs, risks, watch-items) over the solved plan — Gemini-narrated when live,
+deterministic local text otherwise. Every solve is persisted and listable at
+`/api/spr/runs`.
 
 ### 3.5 Sourcing Intelligence
 
-Ranks alternate suppliers per commodity using a weighted score over:
+`engines/sourcing.py` ranks alternate suppliers per commodity by composite =
+0.5 × (1 − current corridor risk) + 0.3 × historical share + 0.2 × lead-time score,
+with sanctions flags. `/api/sourcing/{commodity}/substitutes` adds demand-side
+substitution options; `POST /api/sourcing/{commodity}/analyse` produces an
+LLM-narrated diversification analysis. Explicitly does NOT validate refinery /
+smelter chemistry — see §6 of `assumptions.md`.
 
-- shipping distance from supplier port to nearest Indian terminal
-- corridor risk for the route the shipment would take
-- supplier political-risk index (configured per country)
-- contractual flexibility flag (spot vs term-only)
-- USD price delta vs incumbent
+### 3.6 Impact Cascade
 
-Top-N suppliers and recommended port-of-call are returned with confidence intervals.
+`engines/cascade.py` walks the India dependency graph
+(`data/fixtures/dependency_graph.json`) from any cause node — corridor closure,
+country event, commodity shock — via BFS with per-hop decay 0.85, reporting every
+downstream commodity, sector, and macro variable with severity and transmission
+path. Deterministic and explainable; the LLM layer narrates the structured output.
 
-### 3.6 Digital Twin
+### 3.7 Digital Twin
 
-Leaflet map with composable layers:
+Leaflet map with composable layers: maritime supply routes, refineries, LNG
+terminals, ports, foreign supply sources, domestic demand centres + distribution
+links, oil and gas trunk pipelines (VEDAS/PNGRB), live AIS vessels colored by cargo
+class, corridor status markers, an optional ISRO Resourcesat imagery overlay, and a
+what-if scenario toggle that recolors the network under a selected disruption.
+Tiles: Mapbox dark when `VITE_MAPBOX_PUBLIC_TOKEN` is set, else free CartoDB dark.
 
-- corridor polygons colored by current aggregate risk
-- live vessel markers (tanker / LNG / bulker) clustered above 200 ships
-- terminals: SPR sites, LNG regas (Dahej, Hazira, Kochi, Dabhol, Ennore), coking-coal
-  ports (Paradip, Vizag, Dhamra), solar-module bonded warehouses
-- refinery and steel-plant overlays
-- a time slider that replays the last 72 h of risk evolution
+### 3.8 LLM Narrative Layer
 
-### 3.7 LLM Narrative Layer
+`llm/summarise.py` (`LLMClient`) wraps the `google-generativeai` SDK:
+`gemini-2.5-flash` for synthesis (scenario narratives, executive brief,
+recommendations) and `gemini-2.5-flash-lite` for high-frequency classification.
+Async, in-memory LRU cache keyed on prompt hash, and a fixture fallback
+(`llm_responses.json`) whenever `GEMINI_API_KEY` is unset or live ingest is off —
+so the demo never blocks on an LLM call.
 
-Three Claude prompt families:
+### 3.9 API Layer
 
-- `risk_summary` (Haiku, `claude-haiku-4-5-20251001`) — fast, per-corridor 80-word
-  status update refreshed every minute against the scoring engine output.
-- `scenario_explanation` (Opus, `claude-opus-4-8`) — given the scenario inputs and
-  LP outputs, generate a structured briefing with executive summary, quantitative
-  impact, three options, and a recommended path.
-- `recommendation_draft` (Opus) — produces a memo addressed to MoPNG / MoP / MEA with
-  cited inputs. Citations are inline references to event IDs and dataset rows so the
-  user can audit.
+34 REST routes under `/api` (camelCase JSON, matching the frontend TS contract) plus
+`/ws/feed`. The notable groups:
 
-All prompts include a refusal contract: model must respond with a structured JSON
-when confidence is below threshold so the UI can flag uncertainty.
+| Group | Routes |
+|-------|--------|
+| Health / meta | `GET /api/healthz` |
+| Baselines | `GET /api/baselines`, `POST /api/baselines/override` |
+| Scores | `GET /api/scores`, `/scores/{corridor}`, `/scores/history`, `/scores/latest-snapshot`, `/scores/suppliers/{commodity}`, `GET /api/ais/status` |
+| Scenarios | `GET /api/scenarios`, `POST /api/scenarios/{name}/run`, `POST /api/scenarios/compound`, `GET /api/scenario-runs`, `GET /api/scenario-runs/{run_id}` |
+| Twin | `GET /api/digital-twin/state`, `GET /api/vedas/tile/{product}` |
+| Sourcing | `GET /api/sourcing/{commodity}`, `POST /api/sourcing/{commodity}/analyse`, `GET /api/sourcing/{commodity}/substitutes` |
+| Cascade | `GET /api/impact-cascade/causes`, `POST /api/impact-cascade` |
+| SPR | `GET/POST /api/spr/plan`, `GET /api/spr/runs`, `POST /api/spr/brief` |
+| Analysis | `GET /api/stress-test`, `GET /api/backtest/events`, `GET /api/backtest/{event_id}/replay`, `GET /api/cost-of-inaction` |
+| Narrative | `GET /api/feed`, `GET /api/executive-brief`, `POST /api/chat` |
+| Misc | `GET /api/commodities`, `POST /api/integrations/slack` |
+| WebSocket | `/ws/feed` — headline back-fill, score snapshot on connect, score-update pushes, live GDELT polling (live) / synthetic frames (fixture) |
 
-### 3.8 API Layer
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET    | /api/health | Liveness |
-| GET    | /api/commodities | List configured commodities |
-| GET    | /api/corridors | List corridors and current aggregate risk |
-| GET    | /api/risk/matrix | Full corridor x commodity risk matrix |
-| GET    | /api/events?corridor= | Recent geopolitical events |
-| GET    | /api/vessels?bbox= | Vessel snapshot in a bbox |
-| POST   | /api/scenarios/run | Run a scenario, returns scenario_id |
-| GET    | /api/scenarios/{id} | Scenario result with LP output and narrative |
-| GET    | /api/sourcing?commodity= | Alternate sourcing ranking |
-| GET    | /api/narrative/{corridor} | Latest LLM risk summary |
-| WS     | /ws/risk | Live risk-matrix updates |
-| WS     | /ws/vessels | Live vessel positions |
+Persistence (`app/persistence.py`) is stdlib sqlite3 at `backend/data/state.db`
+(gitignored): `baseline_overrides` (re-applied on startup), `scenario_runs`,
+SPR runs, `score_history`. Connection-per-call; writes are best-effort and logged,
+never fatal to the request path.
 
 ## 4. Data Flow
 
 ```
-GDELT poller  ----> events_store  --+
-AIS WS        ----> vessel_cache --+|
-OFAC snapshot ----> sanctions_db -+||
-Prices feed   ----> price_series -+||
-                                  vvv
-                          +----------------+
-                          | risk_scorer    |
-                          +-------+--------+
-                                  |
-                                  v
-                          +----------------+        +----------------+
-                          | risk_matrix    | <----- | config/weights |
-                          +----+-----+-----+        +----------------+
-                               |     |
-              +----------------+     +---------------+
-              v                                      v
-   +---------------------+               +-----------------------+
-   | scenario_modeller   |               | digital_twin renderer |
-   +----------+----------+               +-----------------------+
-              |
-              v
-   +---------------------+
-   | spr_lp solver       |
-   +----------+----------+
-              |
-              v
-   +---------------------+         +----------------------+
-   | sourcing_intel      | ------> | llm_narrative (Opus) |
-   +---------------------+         +----------+-----------+
-                                              |
-                                              v
-                                       /api/scenarios/{id}
+GDELT ------------> geo signal ----+
+AISStream WS -----> ais anomaly ---+
+OFAC SDN ---------> sanctions -----+--> live_scores (6 corridors x 5 signals)
+EIA/AlphaVantage -> price vol -----+         |
+NewsAPI/GDELT ----> news sentiment-+         +--> scheduler (600s tick)
+                                             |      |--> SQLite score_history
+                                             |      +--> /ws/feed score_update
+                                             v
+                    +------------------------+--------------------+
+                    |                        |                    |
+                    v                        v                    v
+        scenarios.project_scenario   cascade.resolve       sourcing.rank
+                    |                        |                    |
+                    v                        |                    |
+        spr_lp.solve + spr_uncertainty       |                    |
+                    |                        |                    |
+                    +-----------+------------+--------------------+
+                                v
+                     llm.LLMClient (Gemini, cached, fixture fallback)
+                                |
+                                v
+                 routes.py (camelCase JSON) --> React pages
 ```
 
-Density-anomaly detection runs on a 5-minute window over `vessel_cache` and emits
-synthetic events into `events_store` so unusual loitering at chokepoints feeds the
-same scoring path as GDELT-sourced events.
+The lifespan hook in `main.py` boots the stack in order: persistence init →
+baselines refresh → scheduler start → AIS stream start; each step is wrapped so a
+failed external dependency degrades to fixtures instead of blocking startup.
 
 ## 5. Multi-Commodity Coverage Matrix
 
-| Commodity | Primary Source(s) | Primary Corridor | Fixture File | Live API Note |
+| Commodity | Primary Source(s) | Primary Corridor | Data anchors | Live API note |
 |-----------|-------------------|------------------|--------------|---------------|
-| Crude oil | Saudi, Iraq, UAE, US, Russia | Hormuz, Bab el-Mandeb | data/fixtures/crude_imports.json | PPAC bulletin scraper; EIA Brent |
-| LNG | Qatar, US, UAE, Australia | Hormuz, Suez | data/fixtures/lng_flows.json | GIIGNL annual + JKM via Alpha Vantage |
-| Coking coal | Australia (QLD) | Malacca | data/fixtures/coking_coal.json | Ministry of Steel monthly; spot via AV |
-| Lithium | Chile, Argentina, China | South China Sea | data/fixtures/lithium.json | USGS annual snapshot |
-| Cobalt | DRC via CN refiners | Cape / Suez | data/fixtures/cobalt.json | USGS + OFAC overlays |
-| Nickel | Indonesia, Philippines | Malacca | data/fixtures/nickel.json | USGS annual; LME via AV |
-| Rare earths | China (~90%) | South China Sea | data/fixtures/rare_earths.json | USGS; no reliable live spot |
-| Solar PV (modules + cells) | China | South China Sea | data/fixtures/solar_pv.json | MNRE monthly; BloombergNEF proxy |
-| Uranium | Kazakhstan, Russia, France | Caspian-Black Sea | data/fixtures/uranium.json | DAE annual; no public spot WS |
-| LPG / ATF | Saudi, UAE, US | Hormuz | data/fixtures/petro_products.json | PPAC monthly |
+| Crude oil | Iraq, Saudi, Russia, UAE, US | Hormuz, Bab el-Mandeb | india_imports.json, commodity_prices.json | EIA Brent live; PPAC monthly (30-45d lag) |
+| LNG | Qatar, US, UAE, Australia | Hormuz, Suez | lng_terminals.json | EIA Henry Hub live; GIIGNL annual |
+| Coking coal | Australia (QLD) | Malacca | india_imports.json | Ministry of Steel monthly |
+| Lithium | Chile, Argentina, China | South China Sea | critical_minerals.json | USGS annual snapshot |
+| Cobalt | DRC via CN refiners | Malacca | critical_minerals.json | USGS + OFAC overlays |
+| Nickel | Indonesia, Philippines | Malacca | critical_minerals.json | USGS annual |
+| Rare earths | China (~90% refining) | South China Sea | critical_minerals.json | USGS; no reliable live spot |
+| Solar PV | China | South China Sea | solar_imports.json | MNRE monthly |
+| Uranium | Kazakhstan, Russia, France | Malacca | critical_minerals.json | DAE annual; no public spot |
 
-Default runtime mode is fixture-backed. Each adapter exposes a `live=True` switch
-that is no-op unless the matching API key is present in env.
+Default runtime mode is fixture-backed; adapters go live per-source when the
+matching key is present and `ALLOW_LIVE_INGEST=true`.
 
 ## 6. Tech Choices and Rationale
 
-- FastAPI for async-first ingestion and WebSocket fan-out.
-- pandas + pydantic for typed in-memory tables; avoids a DB in the scaffold.
-- scipy HiGHS for LP since it is in-tree and fast for the sizes here; PuLP kept as a
-  fallback when the model needs integer variables.
-- httpx for HTTP because both sync and async share one client.
-- React + Vite + TypeScript for fast HMR and typed props at the component boundary.
-- Leaflet over Mapbox to avoid a token requirement at the hackathon table.
-- Recharts for charts because it composes with React state directly.
-- Tailwind with a constrained palette (slate-900 base, indigo-500 accent, amber and
-  red for alert states) to keep design decisions out of the critical path.
-- Claude Opus for synthesis where reasoning depth matters, Haiku for the
-  high-frequency per-corridor summaries where latency dominates.
+- FastAPI for async-first ingestion, lifespan-managed background tasks, and
+  WebSocket fan-out.
+- PuLP + CBC for the LP: open-source, in-process, ~1s solves at demo horizon.
+- stdlib sqlite3 for persistence — zero new dependencies, connection-per-call,
+  perfectly adequate for overrides + run history at this scale.
+- httpx everywhere for HTTP (async, timeouts per call); structlog for JSON logs.
+- Gemini (`google-generativeai`) for the narrative layer: `gemini-2.5-flash` for
+  synthesis where reasoning depth matters, flash-lite for high-frequency
+  classification where latency dominates. Fixture fallback keeps the demo offline.
+- React + Vite + TypeScript for fast HMR and typed props at the component boundary;
+  `lib/types.ts` is the single shape contract with the backend.
+- Leaflet over a Mapbox GL dependency so the demo needs no token (Mapbox tiles are
+  an optional upgrade via `VITE_MAPBOX_PUBLIC_TOKEN`).
+- Recharts for time series; zustand for the small global UI state.
+- Tailwind with the `op-*` token namespace (dark slate base, `#00d4aa` accent);
+  numbers in IBM Plex Mono with `tabular-nums`.
 
 ## 7. Scalability
 
-Corridors, commodities, sources, and risk weights are declared in `config/*.yaml`.
-Adding a new commodity is a YAML edit plus a fixture file; the adapter, scoring
-matrix column, dashboard tile, and scenario inputs auto-extend. The risk engine
-processes commodities in parallel via `asyncio.gather` and short-circuits on
-configurable `import_exposure` thresholds. AIS handling uses a per-corridor consumer
-so each chokepoint scales independently.
+Corridors, commodities, and scenario parameters are data: corridor centroids /
+baselines / news queries are dicts in `live_scores.py`, scenario elasticities live
+in `scenarios.py` + `docs/assumptions.md`, and infrastructure layers are fixture
+JSON. Adding a commodity or corridor is an entry in those tables plus a fixture —
+the scoring loop, scheduler, twin layers, and scenario plumbing extend without
+structural change. Signal fetches fan out with `asyncio.gather`; the AIS consumer
+is a single socket that scales by bounding box, not by connection count.
 
 ## 8. Security
 
-- All third-party keys are read from environment variables, never checked in.
-- No PII is stored. Vessel data is public AIS; sanctions data is public.
-- The default mode is fixture-backed so the system runs offline at a demo table.
-- LLM prompts include a strict no-tool-call contract; the API never forwards user
-  free-text to Claude without a validated schema wrapper.
-- CORS is locked to the local Vite origin in dev; production builds disable it.
+- All third-party keys come from environment variables; never checked in.
+- No PII. Vessel data is public AIS; sanctions data is public OFAC.
+- Default mode is fixture-backed so the system runs offline at a demo table.
+- User free-text (chat) is wrapped in a structured prompt with app-supplied
+  context; LLM output is rendered as text, never executed.
+- CORS is locked to the local dev origins (5173/3000) in `main.py`.
+- The VEDAS tile proxy keeps the ISRO key server-side.
 
 ## 9. Local-Dev Topology
 
 ```
-+--------------------+         +--------------------+
-| React (Vite :5173) | <-----> | FastAPI (:8000)    |
-+--------------------+   REST  +---------+----------+
-        ^                                |
-        |  WS /ws/risk, /ws/vessels      |
-        +--------------------------------+
-                                         |
-                                         v
-                                +--------------------+
-                                | in-process stores  |
-                                | (pandas, dicts)    |
-                                +--------------------+
-                                         |
-                                         v
-                                +--------------------+
-                                | data/fixtures/*    |
-                                +--------------------+
++--------------------+         +----------------------------+
+| React (Vite :5173) | <-----> | FastAPI (:8000)            |
++--------------------+  REST   |  lifespan: persistence ->  |
+        ^                      |  baselines -> scheduler -> |
+        |  WS /ws/feed         |  ais_stream                |
+        +----------------------+------------+---------------+
+                                            |
+                              +-------------+--------------+
+                              v                            v
+                    +--------------------+       +--------------------+
+                    | data/state.db      |       | data/fixtures/*.json|
+                    | (SQLite, runtime)  |       | (12 pinned snapshots)|
+                    +--------------------+       +--------------------+
 ```
 
-Start order in development: `uvicorn backend.app:app --reload` then
-`npm run dev` in `frontend/`. Both processes are independent; the frontend falls
-back to fixtures if the backend is not reachable so the dashboard always renders.
+Start order in development: `uvicorn app.main:app --reload --port 8000` from
+`backend/`, then `npm run dev` in `frontend/`. The Vite dev server proxies `/api`
+and `/ws` to :8000 (proxy config is only re-read on a full dev-server restart).
 
 ## 10. Production Notes
 
 For a real deployment the following would change:
 
-- Replace the in-process stores with Postgres for relational data
-  (events, sanctions, scenario runs) and Redis for the vessel cache and pub/sub
-  channels that today are in-memory.
+- Replace SQLite with Postgres for relational data (events, sanctions, scenario
+  runs, score history) and Redis for pub/sub fan-out that today is in-process.
 - Move fixture JSON to S3 with versioned object keys; adapters point at S3 by env.
 - Add an authn layer (OIDC against a government SSO) and per-role RBAC, so an
   analyst can run scenarios but only an authorized officer can mark a
   recommendation as adopted.
-- Move the LP solver behind a queue (Celery + Redis or AWS Batch) since real
-  scenarios over 90-day horizons with stochastic shocks dominate request latency.
+- Move the LP + Monte Carlo behind a queue (Celery + Redis) for 90-day stochastic
+  horizons that would dominate request latency.
 - Promote the AIS consumer to a dedicated worker with backpressure and replay from
-  Kafka; the dashboard subscribes via a thin WebSocket gateway.
+  Kafka; the dashboard subscribes via a thin WebSocket gateway. The scheduler's
+  single-task re-entrancy guard becomes a distributed lock.
 - Add observability: OpenTelemetry traces across adapters, scoring, and LLM calls;
-  per-prompt token accounting; cost dashboards for Claude usage.
-- Audit logging for every recommendation draft and every scenario run, since
-  outputs may inform real procurement and reserve actions.
+  per-prompt token accounting; cost dashboards for Gemini usage.
+- Audit logging already exists for scenario runs, SPR solves, and baseline
+  overrides (SQLite); production would ship these to an append-only store.

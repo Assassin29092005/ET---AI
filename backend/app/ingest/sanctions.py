@@ -36,7 +36,6 @@ _OFAC_SDN_XML = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPrev
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "data" / "fixtures" / "sanctions.json"
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0)
 _MATCH_THRESHOLD = 0.86
-_NAMESPACE = {"sdn": "http://tempuri.org/sdnList.xsd"}
 
 
 async def load_sdn_list() -> list[dict]:
@@ -56,7 +55,11 @@ async def load_sdn_list() -> list[dict]:
             reraise=True,
         ):
             with attempt:
-                async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+                # OFAC's SDN endpoint 302-redirects to a presigned S3 URL, so
+                # redirects must be followed or every live fetch raises.
+                async with httpx.AsyncClient(
+                    timeout=_DEFAULT_TIMEOUT, follow_redirects=True
+                ) as client:
                     resp = await client.get(_OFAC_SDN_XML)
                     resp.raise_for_status()
                     xml_bytes = resp.content
@@ -91,28 +94,36 @@ def _normalize(name: str) -> str:
 
 def _parse_sdn_xml(xml_bytes: bytes) -> list[dict]:
     root = ET.fromstring(xml_bytes)
+    # Derive the namespace from the document rather than hardcoding it: OFAC's
+    # sanctionslistservice endpoint serves the SDN list under a namespace that
+    # differs from the legacy tempuri.org one, and could change again.
+    ns_uri = root.tag[1:root.tag.index("}")] if root.tag.startswith("{") else ""
+
+    def q(tag: str) -> str:
+        return f"{{{ns_uri}}}{tag}" if ns_uri else tag
+
     entries: list[dict] = []
-    for entry in root.findall("sdn:sdnEntry", _NAMESPACE):
-        uid = entry.findtext("sdn:uid", default="", namespaces=_NAMESPACE)
-        first = entry.findtext("sdn:firstName", default="", namespaces=_NAMESPACE)
-        last = entry.findtext("sdn:lastName", default="", namespaces=_NAMESPACE)
+    for entry in root.findall(q("sdnEntry")):
+        uid = entry.findtext(q("uid"), default="")
+        first = entry.findtext(q("firstName"), default="")
+        last = entry.findtext(q("lastName"), default="")
         name = f"{first} {last}".strip() or last or first
-        sdn_type = entry.findtext("sdn:sdnType", default="", namespaces=_NAMESPACE)
+        sdn_type = entry.findtext(q("sdnType"), default="")
         programs = [
             p.text or ""
-            for p in entry.findall("sdn:programList/sdn:program", _NAMESPACE)
+            for p in entry.findall(f"{q('programList')}/{q('program')}")
         ]
         aliases = [
-            (a.findtext("sdn:firstName", default="", namespaces=_NAMESPACE) + " "
-             + a.findtext("sdn:lastName", default="", namespaces=_NAMESPACE)).strip()
-            for a in entry.findall("sdn:akaList/sdn:aka", _NAMESPACE)
+            (a.findtext(q("firstName"), default="") + " "
+             + a.findtext(q("lastName"), default="")).strip()
+            for a in entry.findall(f"{q('akaList')}/{q('aka')}")
         ]
         addresses = [
             {
-                "country": a.findtext("sdn:country", default="", namespaces=_NAMESPACE),
-                "city": a.findtext("sdn:city", default="", namespaces=_NAMESPACE),
+                "country": a.findtext(q("country"), default=""),
+                "city": a.findtext(q("city"), default=""),
             }
-            for a in entry.findall("sdn:addressList/sdn:address", _NAMESPACE)
+            for a in entry.findall(f"{q('addressList')}/{q('address')}")
         ]
         entries.append(
             {

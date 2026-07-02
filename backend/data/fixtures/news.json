@@ -1,0 +1,46 @@
+{
+  "_comment": "Static per-corridor news snapshot for offline/fixture mode. Read directly by engines/live_scores._news_signals (bypassing the live-path age filter, exactly like the GDELT snapshot). Sentiment is scored from the title+description against the keyword proxy in live_scores.py; the mix of risk vs de-risk tokens per corridor drives the differentiated news signal. Timestamps are illustrative — the fixture is treated as current-state, not time-filtered.",
+  "hormuz": [
+    {"title": "Tanker seized near Strait of Hormuz as Iran navy raises alert", "source": "Reuters", "published_at": "2026-07-02T06:10:00Z", "url": "https://example.com/hormuz-1", "description": "A crude tanker was detained in the Persian Gulf amid heightened tension over Hormuz transit."},
+    {"title": "Missile strike warning issued for Hormuz shipping lanes", "source": "Bloomberg", "published_at": "2026-07-02T04:40:00Z", "url": "https://example.com/hormuz-2", "description": "Insurers flagged a fresh threat to tankers after a reported drone incident near the strait."},
+    {"title": "Iran conducts naval drills, tankers reroute to avoid Hormuz", "source": "Argus", "published_at": "2026-07-01T22:15:00Z", "url": "https://example.com/hormuz-3", "description": "Escalating tension prompted several VLCCs to slow transit through the Persian Gulf chokepoint."},
+    {"title": "Explosion reported aboard product tanker off Bandar Abbas", "source": "TradeWinds", "published_at": "2026-07-01T18:05:00Z", "url": "https://example.com/hormuz-4", "description": "A fire and blast damaged a vessel near the Strait of Hormuz; cause under investigation."},
+    {"title": "Gulf crude premiums widen on Hormuz transit disruption fears", "source": "S&P Global", "published_at": "2026-07-01T14:20:00Z", "url": "https://example.com/hormuz-5", "description": "Traders priced in a risk of partial closure as sanctions tension mounts around Iran."},
+    {"title": "India monitors Hormuz situation as crude imports stay steady", "source": "Economic Times", "published_at": "2026-07-01T09:30:00Z", "url": "https://example.com/hormuz-6", "description": "Officials said Persian Gulf shipments continue for now despite the naval standoff."},
+    {"title": "Diplomatic talks aim to ease Hormuz tension after tanker incident", "source": "AP", "published_at": "2026-07-01T07:00:00Z", "url": "https://example.com/hormuz-7", "description": "Regional powers pressed for de-escalation to keep the strait open to tanker traffic."}
+  ],
+  "bab_el_mandeb": [
+    {"title": "Houthi drone attack hits cargo ship in the Red Sea", "source": "Reuters", "published_at": "2026-07-02T05:25:00Z", "url": "https://example.com/bab-1", "description": "A missile and drone strike near Bab el-Mandeb forced a vessel to divert, raising Yemen shipping risk."},
+    {"title": "Second vessel struck off Yemen as Bab al-Mandab attacks resume", "source": "TradeWinds", "published_at": "2026-07-02T02:10:00Z", "url": "https://example.com/bab-2", "description": "Shipping lines warned of renewed disruption after an explosion damaged a bulk carrier."},
+    {"title": "Red Sea transit halved as carriers suspend Bab el-Mandeb passage", "source": "Lloyd's List", "published_at": "2026-07-01T20:45:00Z", "url": "https://example.com/bab-3", "description": "Multiple operators suspended Red Sea routing after the latest Houthi threat."},
+    {"title": "Insurers hike war-risk premiums for Red Sea and Yemen waters", "source": "Bloomberg", "published_at": "2026-07-01T16:30:00Z", "url": "https://example.com/bab-4", "description": "Underwriters cited sustained attacks near Bab el-Mandeb as a crisis for regional shipping."},
+    {"title": "Container ships reroute via Cape as Red Sea disruption persists", "source": "Splash247", "published_at": "2026-07-01T11:10:00Z", "url": "https://example.com/bab-5", "description": "Sustained Houthi activity kept Bab al-Mandab shipping under warning."},
+    {"title": "Naval coalition steps up patrols in the southern Red Sea", "source": "AP", "published_at": "2026-07-01T08:20:00Z", "url": "https://example.com/bab-6", "description": "Escorts were expanded near Yemen after the latest incident on the Bab el-Mandeb route."}
+  ],
+  "malacca": [
+    {"title": "Congestion builds at Singapore as tankers queue near Malacca", "source": "Reuters", "published_at": "2026-07-02T03:15:00Z", "url": "https://example.com/mal-1", "description": "Heavy traffic slowed transit through the Strait of Malacca; no security incident reported."},
+    {"title": "Indonesia tightens inspections on shipping in the Malacca Strait", "source": "Nikkei", "published_at": "2026-07-01T19:40:00Z", "url": "https://example.com/mal-2", "description": "New checks on Singapore-bound tankers added delays along the corridor."},
+    {"title": "Piracy warning issued for vessels transiting Malacca", "source": "Splash247", "published_at": "2026-07-01T13:05:00Z", "url": "https://example.com/mal-3", "description": "A reported boarding attempt prompted a security warning for Indonesia shipping lanes."},
+    {"title": "Coking coal shipments to India steady through Malacca", "source": "Argus", "published_at": "2026-07-01T09:50:00Z", "url": "https://example.com/mal-4", "description": "Bulk carrier traffic from Australia remained normal across the strait."},
+    {"title": "Malacca traffic returns to normal after brief weather delay", "source": "Lloyd's List", "published_at": "2026-07-01T06:35:00Z", "url": "https://example.com/mal-5", "description": "Transit resumed and lanes reopened following a squall near Singapore."}
+  ],
+  "south_china_sea": [
+    {"title": "China coast guard confronts vessels in the South China Sea", "source": "Reuters", "published_at": "2026-07-02T05:00:00Z", "url": "https://example.com/scs-1", "description": "A standoff raised tension along a key shipping route amid a fresh maritime incident."},
+    {"title": "Taiwan strait tension flares as military drills expand", "source": "Bloomberg", "published_at": "2026-07-01T21:25:00Z", "url": "https://example.com/scs-2", "description": "Heightened activity near the Taiwan strait added a threat premium for regional shipping."},
+    {"title": "Rare earth export licensing tightened, China signals curbs", "source": "Nikkei", "published_at": "2026-07-01T15:45:00Z", "url": "https://example.com/scs-3", "description": "New restrictions stoked disruption fears for South China Sea magnet and mineral flows."},
+    {"title": "Shipping advisory issued over South China Sea coast guard activity", "source": "Splash247", "published_at": "2026-07-01T10:15:00Z", "url": "https://example.com/scs-4", "description": "Operators were warned of possible boarding and inspection along disputed lanes."},
+    {"title": "Solar module cargoes from China continue to Indian ports", "source": "Economic Times", "published_at": "2026-07-01T07:40:00Z", "url": "https://example.com/scs-5", "description": "PV shipments across the South China Sea stayed on schedule despite the tension."}
+  ],
+  "cape_of_good_hope": [
+    {"title": "More tankers reroute around Cape of Good Hope to avoid Red Sea", "source": "Lloyd's List", "published_at": "2026-07-02T02:50:00Z", "url": "https://example.com/cape-1", "description": "Cape rerouting lengthened voyages as carriers steered clear of Bab el-Mandeb."},
+    {"title": "South Africa bunkering demand climbs on Cape rerouting surge", "source": "Argus", "published_at": "2026-07-01T17:20:00Z", "url": "https://example.com/cape-2", "description": "Longer hauls via the Cape of Good Hope boosted fuel stops off South Africa."},
+    {"title": "Weather delays some tankers off the Cape of Good Hope", "source": "TradeWinds", "published_at": "2026-07-01T12:00:00Z", "url": "https://example.com/cape-3", "description": "A storm briefly slowed South Africa tanker transits before conditions eased."},
+    {"title": "Cape route capacity holds as diverted traffic normalises", "source": "Splash247", "published_at": "2026-07-01T08:05:00Z", "url": "https://example.com/cape-4", "description": "Shipping around the Cape of Good Hope stabilised after the rerouting spike."}
+  ],
+  "suez": [
+    {"title": "Suez Canal transit falls sharply as ships avoid the Red Sea", "source": "Reuters", "published_at": "2026-07-02T04:05:00Z", "url": "https://example.com/suez-1", "description": "Egypt transit volumes dropped amid the Bab el-Mandeb disruption feeding the canal."},
+    {"title": "Egypt weighs Suez tariff changes to retain shipping traffic", "source": "Bloomberg", "published_at": "2026-07-01T18:50:00Z", "url": "https://example.com/suez-2", "description": "Authorities floated a Suez tariff adjustment as diversions cut canal revenue."},
+    {"title": "Suez Canal authority reports lower crude and LNG transit", "source": "S&P Global", "published_at": "2026-07-01T13:35:00Z", "url": "https://example.com/suez-3", "description": "Egypt transit of energy cargoes slid as carriers chose the Cape route."},
+    {"title": "Some carriers signal return to Suez as Red Sea risk is reassessed", "source": "Lloyd's List", "published_at": "2026-07-01T09:15:00Z", "url": "https://example.com/suez-4", "description": "A few lines said they may resume Suez Canal transit if escorts hold."}
+  ]
+}

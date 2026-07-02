@@ -113,26 +113,55 @@ async def _fetch_gdelt_articles(query: str, hours: int) -> list[dict]:
     ]
 
 
+def load_corridor_fixture() -> dict[str, list[dict]]:
+    """Return the raw per-corridor news snapshot ``{corridor: [article, ...]}``.
+
+    Used by the scoring engine in fixture mode to read articles per corridor
+    directly, mirroring how the GDELT snapshot is consumed — the fixture is a
+    static current-state snapshot, so no time filtering is applied. Keys
+    starting with ``_`` (e.g. ``_comment``) are ignored. Returns ``{}`` if the
+    file is missing or is a legacy flat array.
+    """
+    if not _FIXTURE_PATH.exists():
+        log.warning("news.fixture_missing", path=str(_FIXTURE_PATH))
+        return {}
+    with _FIXTURE_PATH.open("r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    if not isinstance(data, dict):
+        return {}
+    return {
+        k: v
+        for k, v in data.items()
+        if not k.startswith("_") and isinstance(v, list)
+    }
+
+
 def _load_fixture(query: str, hours: int) -> list[dict]:
+    """Keyword-filtered flat read, used as the live-path last-resort fallback.
+
+    Accepts both the per-corridor dict shape and a legacy flat array. The
+    fixture is treated as a static snapshot, so rows are not dropped by age.
+    """
     if not _FIXTURE_PATH.exists():
         log.warning("news.fixture_missing", path=str(_FIXTURE_PATH))
         return []
     with _FIXTURE_PATH.open("r", encoding="utf-8") as fh:
-        rows = json.load(fh)
+        data = json.load(fh)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    if isinstance(data, dict):
+        rows: list[dict] = []
+        for k, v in data.items():
+            if not k.startswith("_") and isinstance(v, list):
+                rows.extend(v)
+    else:
+        rows = data
+
     needles = [t.lower() for t in query.split() if t]
     out: list[dict] = []
     for r in rows:
         title = (r.get("title") or "").lower()
         desc = (r.get("description") or "").lower()
         if needles and not any(n in title or n in desc for n in needles):
-            continue
-        try:
-            ts = datetime.fromisoformat(str(r["published_at"]).replace("Z", "+00:00"))
-        except (KeyError, ValueError):
-            ts = datetime.now(timezone.utc)
-        if ts < cutoff:
             continue
         out.append(r)
     return out

@@ -293,9 +293,20 @@ async def _news_signals() -> dict[str, dict[str, Any]]:
     except Exception:
         return {c: {"signal": 0.0, "count": 0, "negative_share": 0.0, "topHeadline": ""} for c in CORRIDOR_CENTROID}
 
+    # In fixture mode read the per-corridor snapshot directly (bypassing the
+    # live-path keyword/age filter), exactly like _geo_signals reads the raw
+    # GDELT snapshot — the fixture is a static current-state snapshot.
+    from app.config import get_settings
+
+    fixture_mode = not get_settings().allow_live_ingest
+    corridor_fixture = news_mod.load_corridor_fixture() if fixture_mode else {}
+
     for c, query in CORRIDOR_NEWS_QUERIES.items():
         try:
-            articles = await news_mod.fetch_headlines(query, hours=24)
+            if fixture_mode:
+                articles = corridor_fixture.get(c, [])
+            else:
+                articles = await news_mod.fetch_headlines(query, hours=24)
         except Exception:
             articles = []
         articles = articles if isinstance(articles, list) else []
