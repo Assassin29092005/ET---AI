@@ -6,34 +6,34 @@ interface CommodityBadgeProps {
 }
 
 const COMMODITY_TONE: Record<Commodity, string> = {
-  crude_oil: 'bg-amber-50 text-amber-800 border-amber-200',
-  lng: 'bg-blue-50 text-blue-800 border-blue-200',
-  coking_coal: 'bg-slate-100 text-slate-800 border-slate-200',
-  lithium: 'bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200',
-  cobalt: 'bg-sky-50 text-sky-800 border-sky-200',
-  nickel: 'bg-teal-50 text-teal-800 border-teal-200',
-  rare_earths: 'bg-violet-50 text-violet-800 border-violet-200',
-  solar_pv: 'bg-yellow-50 text-yellow-800 border-yellow-200',
-  uranium: 'bg-lime-50 text-lime-800 border-lime-200',
-  lpg: 'bg-orange-50 text-orange-800 border-orange-200',
-  atf: 'bg-cyan-50 text-cyan-800 border-cyan-200',
-  copper: 'bg-orange-50 text-orange-800 border-orange-200',
-  graphite: 'bg-slate-100 text-slate-800 border-slate-200',
-  manganese: 'bg-rose-50 text-rose-800 border-rose-200',
-  polysilicon: 'bg-amber-50 text-amber-800 border-amber-200',
-  silver: 'bg-slate-100 text-slate-700 border-slate-300',
-  thermal_coal: 'bg-slate-100 text-slate-800 border-slate-200',
-  pgm: 'bg-indigo-50 text-indigo-800 border-indigo-200',
-  rock_phosphate: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-  potash: 'bg-red-50 text-red-800 border-red-200',
+  crude_oil: 'border-op-warn/50 text-op-warn',
+  lng: 'border-op-accent/50 text-op-accent',
+  coking_coal: 'border-op-ink3 text-op-ink2',
+  lithium: 'border-fuchsia-400/40 text-fuchsia-300',
+  cobalt: 'border-sky-400/40 text-sky-300',
+  nickel: 'border-teal-400/40 text-teal-300',
+  rare_earths: 'border-violet-400/40 text-violet-300',
+  solar_pv: 'border-yellow-400/40 text-yellow-300',
+  uranium: 'border-lime-400/40 text-lime-300',
+  lpg: 'border-orange-400/40 text-orange-300',
+  atf: 'border-cyan-400/40 text-cyan-300',
+  copper: 'border-orange-400/40 text-orange-300',
+  graphite: 'border-op-ink3 text-op-ink2',
+  manganese: 'border-rose-400/40 text-rose-300',
+  polysilicon: 'border-amber-400/40 text-amber-300',
+  silver: 'border-slate-300/40 text-slate-200',
+  thermal_coal: 'border-op-ink3 text-op-ink2',
+  pgm: 'border-indigo-300/40 text-indigo-200',
+  rock_phosphate: 'border-emerald-400/40 text-emerald-300',
+  potash: 'border-red-400/40 text-red-300',
 };
 
 export function CommodityBadge({ commodity, size = 'sm' }: CommodityBadgeProps) {
-  const tone = COMMODITY_TONE[commodity] ?? 'bg-slate-50 text-slate-800 border-slate-200';
-  const sizing = size === 'sm' ? 'text-[9px] px-1.5 py-0.5 rounded' : 'text-xs px-2 py-0.5 rounded-md';
+  const tone = COMMODITY_TONE[commodity] ?? 'border-op-border text-op-ink2';
+  const sizing = size === 'sm' ? 'text-micro px-1.5 py-0.5' : 'text-meta px-2 py-0.5';
   return (
     <span
-      className={`inline-flex items-center border font-semibold uppercase tracking-wider ${sizing} ${tone}`}
+      className={`inline-flex items-center rounded-sm border font-mono uppercase tracking-wider ${sizing} ${tone}`}
     >
       {COMMODITY_LABEL[commodity] ?? commodity}
     </span>

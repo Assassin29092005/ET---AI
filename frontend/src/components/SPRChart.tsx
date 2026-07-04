@@ -48,51 +48,49 @@ export function SPRChart({ plan, baseline }: SPRChartProps) {
   const rows = merge(toRows(plan), baseline);
   const hasReserve = rows.some((r) => r.reserve != null);
   return (
-    <div className="card p-5">
-      <div className="mb-3.5 flex items-center justify-between border-b border-slate-100 pb-2">
-        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-          SPR Drawdown &amp; Reserve Trajectory
+    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-100">
+          SPR drawdown &amp; reserve trajectory vs baseline
         </h3>
-        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-          {plan.currentFillMb.toFixed(1)} Mbbl current fill
-        </div>
+        <div className="text-xs text-slate-500">{plan.currentFillMb.toFixed(1)} Mbbl current fill</div>
       </div>
       <div className="h-72 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={rows} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
-            <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" />
+            <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
             <XAxis
               dataKey="day"
-              stroke="#94a3b8"
-              tick={{ fill: '#64748b', fontSize: 10 }}
-              label={{ value: 'Day', position: 'insideBottom', offset: -2, fill: '#64748b', fontSize: 10 }}
+              stroke="#64748b"
+              tick={{ fill: '#94a3b8', fontSize: 11 }}
+              label={{ value: 'Day', position: 'insideBottom', offset: -2, fill: '#64748b', fontSize: 11 }}
             />
             <YAxis
               yAxisId="flow"
               stroke="#64748b"
-              tick={{ fill: '#64748b', fontSize: 10 }}
-              label={{ value: 'Mbbl/day', angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 9 }}
+              tick={{ fill: '#94a3b8', fontSize: 11 }}
+              label={{ value: 'Mbbl/day', angle: -90, position: 'insideLeft', fill: '#64748b', fontSize: 10 }}
             />
             <YAxis
               yAxisId="reserve"
               orientation="right"
               stroke="#64748b"
-              tick={{ fill: '#64748b', fontSize: 10 }}
-              label={{ value: 'Reserve (Mbbl)', angle: 90, position: 'insideRight', fill: '#64748b', fontSize: 9 }}
+              tick={{ fill: '#94a3b8', fontSize: 11 }}
+              label={{ value: 'Reserve (Mbbl)', angle: 90, position: 'insideRight', fill: '#64748b', fontSize: 10 }}
             />
             <Tooltip
-              contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11, color: '#334155' }}
-              labelStyle={{ color: '#64748b' }}
+              contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+              labelStyle={{ color: '#94a3b8' }}
             />
-            <Legend wrapperStyle={{ fontSize: 10, fontWeight: 600, color: '#4a5568' }} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
             <Area
               yAxisId="flow"
               type="monotone"
               dataKey="optimisedDraw"
               name="Optimised draw (Mbbl/d)"
-              fill="#3b82f6"
-              fillOpacity={0.15}
-              stroke="#3b82f6"
+              fill="#6366f1"
+              fillOpacity={0.25}
+              stroke="#6366f1"
               strokeWidth={2}
             />
             <Area
@@ -101,7 +99,7 @@ export function SPRChart({ plan, baseline }: SPRChartProps) {
               dataKey="refill"
               name="Refill (Mbbl/d)"
               fill="#10b981"
-              fillOpacity={0.15}
+              fillOpacity={0.25}
               stroke="#10b981"
               strokeWidth={2}
             />
@@ -112,7 +110,7 @@ export function SPRChart({ plan, baseline }: SPRChartProps) {
                 dataKey="baselineDraw"
                 name="Baseline flat draw (Mbbl/d)"
                 fill="#f97316"
-                fillOpacity={0.08}
+                fillOpacity={0.12}
                 stroke="#f97316"
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
@@ -124,7 +122,7 @@ export function SPRChart({ plan, baseline }: SPRChartProps) {
                 type="monotone"
                 dataKey="reserve"
                 name="Reserve level (Mbbl)"
-                stroke="#334155"
+                stroke="#a5b4fc"
                 strokeWidth={2}
                 dot={false}
               />

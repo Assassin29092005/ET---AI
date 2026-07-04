@@ -16,47 +16,45 @@ interface MetricCardProps {
 }
 
 const TIER_BORDER: Record<RiskTier, string> = {
-  low: "border-l-emerald-500",
-  elevated: "border-l-amber-500",
-  high: "border-l-orange-500",
-  critical: "border-l-red-500",
+  low: "border-l-op-good",
+  elevated: "border-l-op-warn",
+  high: "border-l-amber-500",
+  critical: "border-l-op-danger",
 };
 
 const TREND_COLOR: Record<Trend["direction"], string> = {
-  up: "text-emerald-600 bg-emerald-50 border-emerald-100",
-  down: "text-red-600 bg-red-50 border-red-100",
-  flat: "text-slate-500 bg-slate-50 border-slate-100",
+  up: "text-op-good",
+  down: "text-op-danger",
+  flat: "text-op-ink3",
 };
 
 const TREND_ARROW: Record<Trend["direction"], string> = {
   up: "▲",
   down: "▼",
-  flat: "•",
+  flat: "·",
 };
 
 export function MetricCard({ label, value, subValue, tier, trend, unit }: MetricCardProps) {
-  const borderClass = tier ? `border-l-4 ${TIER_BORDER[tier]}` : "";
+  const borderClass = tier ? `border-l-2 ${TIER_BORDER[tier]}` : "";
 
   return (
-    <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-card transition-all duration-150 hover:shadow-card-hover ${borderClass}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</div>
-      <div className="mt-3 flex items-baseline gap-2 flex-wrap">
-        <span className="font-mono text-3xl font-bold tabular-nums tracking-tighter text-slate-800">
+    <div className={`rounded-md border border-op-border bg-op-panel p-4 ${borderClass}`}>
+      <div className="text-micro uppercase tracking-wider text-op-ink3">{label}</div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="font-mono text-2xl font-medium tabular-nums tracking-tighter text-op-ink">
           {typeof value === "number" ? value.toFixed(2) : value}
         </span>
-        {unit && <span className="text-xs font-semibold text-slate-400">{unit}</span>}
+        {unit && <span className="text-micro text-op-ink3">{unit}</span>}
         {trend && (
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${TREND_COLOR[trend.direction]}`}>
-            <span>{TREND_ARROW[trend.direction]}</span>
-            <span className="font-mono">
-              {trend.format === "pct"
-                ? `${(trend.delta * 100).toFixed(1)}%`
-                : trend.delta.toFixed(2)}
-            </span>
+          <span className={`font-mono text-meta tabular-nums ${TREND_COLOR[trend.direction]}`}>
+            {TREND_ARROW[trend.direction]}{" "}
+            {trend.format === "pct"
+              ? `${(trend.delta * 100).toFixed(1)}%`
+              : trend.delta.toFixed(2)}
           </span>
         )}
       </div>
-      {subValue && <div className="mt-2 text-xs font-medium text-slate-500">{subValue}</div>}
+      {subValue && <div className="mt-1 text-meta text-op-ink2">{subValue}</div>}
     </div>
   );
 }

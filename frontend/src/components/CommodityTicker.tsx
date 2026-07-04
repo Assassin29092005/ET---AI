@@ -5,8 +5,8 @@ interface CommodityTickerProps {
 }
 
 function ChangeArrow({ pct }: { pct: number }) {
-  if (Math.abs(pct) < 0.01) return <span className="text-slate-400">·</span>;
-  return pct > 0 ? <span className="text-emerald-600">▲</span> : <span className="text-red-600">▼</span>;
+  if (Math.abs(pct) < 0.01) return <span className="text-slate-500">·</span>;
+  return pct > 0 ? <span className="text-emerald-300">▲</span> : <span className="text-red-300">▼</span>;
 }
 
 function commodityShort(c: string): string {
@@ -33,24 +33,24 @@ function priceFmt(p: number, unit: string): string {
 export function CommodityTicker({ items }: CommodityTickerProps) {
   if (!items || items.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5 font-mono text-[10px]">
+    <div className="flex items-center gap-2 font-mono text-[11px]">
       {items.slice(0, 5).map((item) => (
         <div
           key={item.symbol}
-          className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-600"
+          className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-900/60 px-2 py-1"
         >
-          <span className="text-slate-400 font-semibold">{commodityShort(item.commodity)}</span>
-          <span className="font-bold text-slate-700 tabular-nums">
+          <span className="text-slate-400">{commodityShort(item.commodity)}</span>
+          <span className="font-semibold text-slate-100 tabular-nums">
             {priceFmt(item.priceUsd, item.unit)}
           </span>
           <ChangeArrow pct={item.changePct24h} />
           <span
             className={
               item.changePct24h > 0
-                ? 'text-emerald-600 font-medium tabular-nums'
+                ? 'text-emerald-300 tabular-nums'
                 : item.changePct24h < 0
-                  ? 'text-red-600 font-medium tabular-nums'
-                  : 'text-slate-400 tabular-nums'
+                  ? 'text-red-300 tabular-nums'
+                  : 'text-slate-500 tabular-nums'
             }
           >
             {Math.abs(item.changePct24h).toFixed(1)}%

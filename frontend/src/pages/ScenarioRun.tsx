@@ -26,6 +26,7 @@ import {
 } from '@/lib/types';
 import { commodityUnitShort, fmtNumber, fmtTime } from '@/lib/fmt';
 import CommodityBadge from '@/components/CommodityBadge';
+import ImpactBar from '@/components/ImpactBar';
 import NarrativeFeed from '@/components/NarrativeFeed';
 import CostStrip from '@/components/CostStrip';
 
@@ -43,18 +44,6 @@ export default function ScenarioRun() {
   const [cost, setCost] = useState<CostOfInaction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Live IST Clock
-  const [timeStr, setTimeStr] = useState('');
-  useEffect(() => {
-    const update = () => {
-      const now = new Date();
-      setTimeStr(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) + ' IST');
-    };
-    update();
-    const t = setInterval(update, 1000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     if (!name) return;
@@ -127,226 +116,145 @@ export default function ScenarioRun() {
     ? result.baseline.sprCoverDays - result.projected.sprCoverDays
     : 0;
 
-  const runDateStr = useMemo(() => {
-    if (!result) return '';
-    const date = new Date(result.generatedAt);
-    return `RUN ${date.getDate()} ${date.toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${date.getFullYear()}, ${date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })} IST`;
-  }, [result]);
-
   return (
-    <div className="flex flex-col gap-6">
-      {/* Back button and navigation */}
-      <div className="flex justify-between items-center -mb-2">
-        <button
-          type="button"
-          className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1.5"
-          onClick={() => navigate('/scenarios')}
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-          </svg>
-          Back to Scenarios
-        </button>
-      </div>
-
-      {/* Header section matching image */}
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex flex-col gap-5">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-blue-600 font-bold">Scenario Overview</p>
-          <h1 className="mt-1 text-2xl font-bold text-white leading-tight">
-            Scenario: {meta?.label ?? name}
+          <p className="text-[11px] uppercase tracking-[0.2em] text-indigo-400">Scenario</p>
+          <h1 className="mt-1 text-xl font-semibold text-slate-100">
+            {meta?.label ?? name}
           </h1>
           {meta && (
-            <p className="mt-1.5 text-xs text-slate-400 font-medium leading-relaxed max-w-3xl">
-              {meta.description}
-            </p>
-          )}
-          {meta && (
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-2 flex items-center gap-2">
               <CommodityBadge commodity={meta.primary_commodity} size="md" />
-              <span className="rounded border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm">
+              <span className="rounded border border-slate-700 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
                 {CORRIDOR_LABEL[meta.primary_corridor] ?? meta.primary_corridor}
               </span>
             </div>
           )}
         </div>
-        <div className="flex flex-col items-end text-right">
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-[11px] font-mono font-bold text-slate-800 shadow-sm">
-            IST {timeStr}
-          </div>
+        <div className="text-right">
+          <button
+            type="button"
+            className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:border-indigo-500 hover:text-slate-100"
+            onClick={() => navigate('/twin')}
+          >
+            Back to digital twin
+          </button>
           {result && (
-            <div className="mt-2 font-mono text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
-              {runDateStr}
+            <div className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">
+              Run {fmtTime(result.generatedAt)}
             </div>
           )}
         </div>
       </header>
 
+      {meta && (
+        <p className="text-sm text-slate-400">{meta.description}</p>
+      )}
+
       {loading && !result && (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-400 font-medium shadow-sm">
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-sm text-slate-500">
           Running scenario...
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-medium">
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
           {error}
         </div>
       )}
 
       {result && (
         <>
-          {/* Custom Metric Cards Row with Sparkline */}
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Card 1: Brent Uplift */}
-            <div className="card p-5 flex justify-between items-start gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Brent uplift</span>
-                <span className="text-2xl font-bold font-mono tracking-tight text-slate-800">
-                  ${result.projected.brentUsd.toFixed(2)}
-                </span>
-                <span className="text-[10px] text-slate-400 font-semibold">
-                  ${result.baseline.brentUsd.toFixed(2)} – ${result.projected.brentUsd.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex flex-col items-end justify-between h-full py-0.5">
-                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">
-                  ▲ +{brentUplift.toFixed(1)}%
-                </span>
-                {(() => {
-                  const brentPoints = result.timeline.map((t) => t.brentUsd);
-                  const minP = Math.min(...brentPoints);
-                  const maxP = Math.max(...brentPoints);
-                  const range = maxP - minP || 1;
-                  const pointsStr = brentPoints
-                    .map((p, idx) => {
-                      const x = (idx / (brentPoints.length - 1)) * 64;
-                      const y = 20 - ((p - minP) / range) * 16 - 2;
-                      return `${x},${y}`;
-                    })
-                    .join(' ');
-                  return (
-                    <svg className="w-16 h-6 text-red-500 mt-2.5" stroke="currentColor" fill="none" strokeWidth={1.5}>
-                      <polyline points={pointsStr} />
-                    </svg>
-                  );
-                })()}
-              </div>
-            </div>
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <ImpactBar
+              label="Brent uplift"
+              value={brentUplift}
+              max={50}
+              format="pct"
+              sub={`$${result.baseline.brentUsd.toFixed(2)} → $${result.projected.brentUsd.toFixed(2)}`}
+            />
+            <ImpactBar
+              label="SPR runway lost"
+              value={sprDelta}
+              max={result.baseline.sprCoverDays}
+              format="days"
+              sub={`${result.projected.sprCoverDays.toFixed(1)} d remaining`}
+            />
+            <ImpactBar
+              label="GDP impact"
+              value={result.projected.gdpImpactBps}
+              max={120}
+              format="bps"
+              positiveIsBad={false}
+              sub="vs. baseline trajectory"
+            />
+            <ImpactBar
+              label="Inflation impact"
+              value={result.projected.inflationImpactBps}
+              max={120}
+              format="bps"
+              sub="WPI / CPI passthrough"
+            />
+          </section>
 
-            {/* Card 2: SPR Runway Lost */}
-            <div className="card p-5 flex justify-between items-start gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">SPR runway lost</span>
-                <span className="text-2xl font-bold font-mono tracking-tight text-slate-800">
-                  {sprDelta.toFixed(1)} d
-                </span>
-                <span className="text-[10px] text-slate-400 font-semibold">
-                  {result.projected.sprCoverDays.toFixed(1)} remaining
-                </span>
-              </div>
-              <div className="flex flex-col items-end justify-start py-0.5">
-                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">
-                  ▲ {sprDelta.toFixed(1)} d
-                </span>
-              </div>
-            </div>
-
-            {/* Card 3: GDP Impact */}
-            <div className="card p-5 flex justify-between items-start gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">GDP impact</span>
-                <span className="text-2xl font-bold font-mono tracking-tight text-slate-850">
-                  {result.projected.gdpImpactBps.toFixed(0)} bps
-                </span>
-                <span className="text-[10px] text-slate-400 font-semibold">
-                  vs. baseline trajectory
-                </span>
-              </div>
-              <div className="flex flex-col items-end justify-start py-0.5">
-                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">
-                  ▼ {result.projected.gdpImpactBps.toFixed(0)} bps
-                </span>
-              </div>
-            </div>
-
-            {/* Card 4: Inflation Impact */}
-            <div className="card p-5 flex justify-between items-start gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Inflation impact</span>
-                <span className="text-2xl font-bold font-mono tracking-tight text-slate-850">
-                  {result.projected.inflationImpactBps.toFixed(0)} bps
-                </span>
-                <span className="text-[10px] text-slate-400 font-semibold">
-                  WPI / CPI passthrough
-                </span>
-              </div>
-              <div className="flex flex-col items-end justify-start py-0.5">
-                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">
-                  ▼ {result.projected.inflationImpactBps.toFixed(0)} bps
-                </span>
-              </div>
+          <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-100">Cascade timeline</h3>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <XAxis dataKey="day" stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis yAxisId="usd" stroke="#fbbf24" tick={{ fill: '#fbbf24', fontSize: 11 }} />
+                  <YAxis yAxisId="mb" orientation="right" stroke="#818cf8" tick={{ fill: '#818cf8', fontSize: 11 }} />
+                  <Tooltip
+                    contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: '#94a3b8' }}
+                  />
+                  <Line yAxisId="usd" type="monotone" dataKey="brent" name="Brent (USD)" stroke="#fbbf24" strokeWidth={2} dot={false} />
+                  <Line yAxisId="mb" type="monotone" dataKey="sprDraw" name="SPR daily draw (MB)" stroke="#818cf8" strokeWidth={2} dot={false} />
+                  <Line yAxisId="mb" type="monotone" dataKey="capeRoute" name="Cape rerouting (%)" stroke="#34d399" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           </section>
 
-          {/* Side-by-side Charts Grid */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <section className="card p-5">
-              <h3 className="mb-3 text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 uppercase tracking-wider">Cascade Timeline</h3>
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" />
-                    <XAxis dataKey="day" stroke="#94a3b8" tick={{ fill: '#64748b', fontSize: 10 }} />
-                    <YAxis yAxisId="usd" stroke="#d97706" tick={{ fill: '#d97706', fontSize: 10 }} />
-                    <YAxis yAxisId="mb" orientation="right" stroke="#4f46e5" tick={{ fill: '#4f46e5', fontSize: 10 }} />
-                    <Tooltip
-                      contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11, color: '#334155' }}
-                      labelStyle={{ color: '#64748b' }}
-                    />
-                    <Line yAxisId="usd" type="monotone" dataKey="brent" name="Brent (USD)" stroke="#d97706" strokeWidth={2} dot={false} />
-                    <Line yAxisId="mb" type="monotone" dataKey="sprDraw" name="SPR daily draw (MB)" stroke="#4f46e5" strokeWidth={2} dot={false} />
-                    <Line yAxisId="mb" type="monotone" dataKey="capeRoute" name="Cape rerouting (%)" stroke="#059669" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-
-            <section className="card p-5">
-              <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 uppercase tracking-wider">
-                Sector Trajectory Under Shock
-              </h3>
-              <p className="mb-3 text-[9px] text-slate-400 font-semibold uppercase tracking-wider">
-                Refinery run rate, domestic diesel price, power-sector stress, and GDP growth over the disruption window.
-              </p>
-              <div className="h-60 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trajectoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid stroke="#f1f5f9" strokeDasharray="3 3" />
-                    <XAxis dataKey="day" stroke="#94a3b8" tick={{ fill: '#64748b', fontSize: 10 }} />
-                    <YAxis yAxisId="pct" stroke="#64748b" tick={{ fill: '#64748b', fontSize: 10 }} domain={[0, 110]} />
-                    <YAxis yAxisId="gdp" orientation="right" stroke="#059669" tick={{ fill: '#059669', fontSize: 10 }} domain={[5, 7]} />
-                    <Tooltip
-                      contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11, color: '#334155' }}
-                      labelStyle={{ color: '#64748b' }}
-                    />
-                    <ReferenceLine
-                      yAxisId="gdp"
-                      y={6.5}
-                      stroke="#059669"
-                      strokeOpacity={0.4}
-                      strokeDasharray="2 4"
-                      label={{ value: 'GDP trend 6.5%', position: 'insideTopRight', fill: '#059669', fontSize: 9 }}
-                    />
-                    <Line yAxisId="pct" type="monotone" dataKey="refinery" name="Refinery run rate (%)" stroke="#2563eb" strokeWidth={2} dot={false} />
-                    <Line yAxisId="pct" type="monotone" dataKey="power" name="Power stress index" stroke="#ea580c" strokeWidth={2} dot={false} />
-                    <Line yAxisId="pct" type="monotone" dataKey="diesel" name="Diesel (Rs/L)" stroke="#d97706" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
-                    <Line yAxisId="gdp" type="monotone" dataKey="gdp" name="GDP growth (%)" stroke="#059669" strokeWidth={2.5} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          </div>
+          <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-1 text-sm font-semibold text-slate-100">
+              Sector trajectory under the shock
+            </h3>
+            <p className="mb-3 text-[11px] text-slate-500">
+              Refinery run rate, domestic diesel price, power-sector stress, and GDP growth over the
+              disruption window.
+            </p>
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trajectoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
+                  <XAxis dataKey="day" stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis yAxisId="pct" stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 110]} />
+                  <YAxis yAxisId="gdp" orientation="right" stroke="#34d399" tick={{ fill: '#34d399', fontSize: 11 }} domain={[5, 7]} />
+                  <Tooltip
+                    contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: '#94a3b8' }}
+                  />
+                  <ReferenceLine
+                    yAxisId="gdp"
+                    y={6.5}
+                    stroke="#34d399"
+                    strokeOpacity={0.4}
+                    strokeDasharray="2 4"
+                    label={{ value: 'GDP trend 6.5%', position: 'insideTopRight', fill: '#34d399', fontSize: 10 }}
+                  />
+                  <Line yAxisId="pct" type="monotone" dataKey="refinery" name="Refinery run rate (%)" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                  <Line yAxisId="pct" type="monotone" dataKey="power" name="Power stress index" stroke="#f97316" strokeWidth={2} dot={false} />
+                  <Line yAxisId="pct" type="monotone" dataKey="diesel" name="Diesel (Rs/L)" stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
+                  <Line yAxisId="gdp" type="monotone" dataKey="gdp" name="GDP growth (%)" stroke="#34d399" strokeWidth={2.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
           {cost && <CostStrip cost={cost} />}
 
@@ -358,54 +266,52 @@ export default function ScenarioRun() {
           />
 
           {sourcing.length > 0 && meta && (
-            <section className="card overflow-hidden">
-              <div className="border-b border-slate-200 px-5 py-4 bg-slate-50">
-                <h3 className="text-sm font-bold text-slate-800">
-                  Alternative Sources for {COMMODITY_LABEL[meta.primary_commodity]}
+            <section className="rounded-lg border border-slate-800 bg-slate-900">
+              <div className="border-b border-slate-800 px-5 py-3">
+                <h3 className="text-sm font-semibold text-slate-100">
+                  Alternative sources for {COMMODITY_LABEL[meta.primary_commodity]}
                 </h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="table-op">
-                  <thead>
-                    <tr>
-                      <th className="px-4 py-2 text-left">Rank</th>
-                      <th className="px-4 py-2 text-left">Supplier / Country</th>
-                      <th className="px-4 py-2 text-right">Volume ({meta ? commodityUnitShort(meta.primary_commodity) : ''})</th>
-                      <th className="px-4 py-2 text-right">Lead Time</th>
-                      <th className="px-4 py-2 text-right">Risk</th>
-                      <th className="px-4 py-2 text-left">Sanctions</th>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-900/50 text-[10px] uppercase tracking-wider text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Rank</th>
+                    <th className="px-4 py-2 text-left">Supplier / country</th>
+                    <th className="px-4 py-2 text-right">Volume {meta ? commodityUnitShort(meta.primary_commodity) : ''}</th>
+                    <th className="px-4 py-2 text-right">Lead time</th>
+                    <th className="px-4 py-2 text-right">Risk</th>
+                    <th className="px-4 py-2 text-left">Sanctions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sourcing.slice(0, 6).map((s) => (
+                    <tr key={`${s.supplier}-${s.country}`} className="border-t border-slate-800">
+                      <td className="px-4 py-2 text-slate-300">{s.rank}</td>
+                      <td className="px-4 py-2 text-slate-200">
+                        <div>{s.supplier}</div>
+                        <div className="text-[11px] text-slate-500">{s.country}</div>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">{fmtNumber(s.volumeMb, 1)}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">{s.leadTimeDays} d</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-slate-300">{s.routeRiskScore.toFixed(0)}</td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={
+                            s.sanctionsCheck === 'clear'
+                              ? 'text-emerald-300'
+                              : s.sanctionsCheck === 'flag'
+                                ? 'text-amber-300'
+                                : 'text-red-300'
+                          }
+                        >
+                          {s.sanctionsCheck}
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {sourcing.slice(0, 6).map((s) => (
-                      <tr key={`${s.supplier}-${s.country}`} className="border-t border-slate-100 hover:bg-slate-50/50">
-                        <td className="px-4 py-3 text-slate-400 font-mono font-bold text-xs">{s.rank}</td>
-                        <td className="px-4 py-3">
-                          <div className="text-slate-850 font-bold">{s.supplier}</div>
-                          <div className="text-[10px] text-slate-400 font-semibold">{s.country}</div>
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-700 font-semibold">{fmtNumber(s.volumeMb, 1)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-700 font-semibold">{s.leadTimeDays} d</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-850">{s.routeRiskScore.toFixed(0)}</td>
-                        <td className="px-4 py-3 text-xs font-semibold">
-                          <span
-                            className={
-                              s.sanctionsCheck === 'clear'
-                                ? 'text-emerald-600'
-                                : s.sanctionsCheck === 'flag'
-                                  ? 'text-amber-600'
-                                  : 'text-red-650'
-                            }
-                          >
-                            {s.sanctionsCheck}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="border-t border-slate-100 px-5 py-3.5 text-[10px] text-slate-400 font-semibold bg-slate-50/50">
+                  ))}
+                </tbody>
+              </table>
+              <div className="border-t border-slate-800 px-5 py-2 text-[11px] text-slate-500">
                 Sourcing intelligence ranks alternatives by current risk, historical share, and lead-time. Refinery compatibility is NOT validated.
               </div>
             </section>

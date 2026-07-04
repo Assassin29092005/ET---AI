@@ -40,35 +40,35 @@ function NodeChip({ node, showLag }: { node: CascadeImpactNode; showLag?: boolea
   const downGood = m?.direction === 'down';
   return (
     <div
-      className="rounded-lg border px-3 py-2.5 transition-shadow hover:shadow-sm bg-white"
-      style={{ borderColor: `${color}33` }}
+      className="rounded-md border px-3 py-2"
+      style={{ borderColor: `${color}55`, background: severityBg(node.severity) }}
       title={node.via.length ? node.via.join(' → ') : node.label}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-slate-800">{node.label}</span>
+        <span className="text-xs text-slate-100">{node.label}</span>
         {m ? (
-          <span className="font-mono text-[10px] tabular-nums font-bold" style={{ color }}>
+          <span className="font-mono text-[10px] tabular-nums font-semibold" style={{ color }}>
             {m.deltaLabel}
           </span>
         ) : (
-          <span className="font-mono text-[10px] tabular-nums font-bold" style={{ color }}>
+          <span className="font-mono text-[10px] tabular-nums" style={{ color }}>
             {(node.severity * 100).toFixed(0)}
           </span>
         )}
       </div>
       {m && (
-        <div className="mt-1 flex items-baseline gap-1.5 font-mono text-[10px] tabular-nums">
-          <span className="text-slate-400 font-medium">{fmtPrice(m.current)}</span>
-          <span className="text-slate-350">→</span>
-          <span className="font-bold" style={{ color: downGood ? '#b45309' : color }}>{fmtPrice(m.projected)}</span>
-          <span className="text-[9px] text-slate-400 font-semibold font-sans lowercase">{m.unit}</span>
+        <div className="mt-1 flex items-baseline gap-1.5 font-mono text-[11px] tabular-nums">
+          <span className="text-slate-400">{fmtPrice(m.current)}</span>
+          <span className="text-slate-600">→</span>
+          <span style={{ color: downGood ? '#fbbf24' : color }}>{fmtPrice(m.projected)}</span>
+          <span className="text-[9px] text-slate-500">{m.unit}</span>
         </div>
       )}
-      <div className="mt-2 h-[3px] w-full overflow-hidden rounded-sm bg-slate-100">
+      <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-sm bg-slate-800">
         <div className="h-full" style={{ width: `${node.severity * 100}%`, background: color }} />
       </div>
       {showLag && node.lagDays > 0 && (
-        <div className="mt-1 text-[9px] text-slate-400 font-semibold">~{node.lagDays}d lag</div>
+        <div className="mt-1 text-[10px] text-slate-500">~{node.lagDays}d lag</div>
       )}
     </div>
   );
@@ -89,13 +89,13 @@ function Column({
 }) {
   return (
     <div className="flex min-w-0 flex-col">
-      <div className="mb-2 px-1">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{title}</div>
-        <div className="text-[10px] text-slate-400 font-semibold mt-0.5">{subtitle}</div>
+      <div className="mb-2">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500">{title}</div>
+        <div className="text-[10px] text-slate-600">{subtitle}</div>
       </div>
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col gap-2">
         {nodes.length === 0 ? (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-400 font-medium">
+          <div className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-[11px] text-slate-600">
             {empty ?? 'No nodes reached'}
           </div>
         ) : (
@@ -155,25 +155,26 @@ export default function ImpactCascade() {
   const selectedCause = causes.find((c) => c.id === causeId);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <header>
-        <p className="text-[10px] uppercase tracking-wider text-blue-600 font-bold">Impact Engine</p>
-        <h1 className="mt-1 text-2xl font-bold text-white leading-tight">
-          Impact Cascade Analysis
+        <p className="text-[11px] uppercase tracking-[0.2em] text-indigo-400">Impact engine</p>
+        <h1 className="mt-1 text-xl font-semibold text-slate-100">
+          Impact cascade — any cause, everything it hits in India
         </h1>
-        <p className="mt-1 text-xs text-slate-400 font-medium max-w-3xl">
+        <p className="mt-1 text-xs text-slate-400 max-w-3xl">
           Pick a cause anywhere in the world. The dependency-graph engine traces the full chain
-          reaction into India — commodities, industrial sectors, and macro variables.
+          reaction into India — commodities, industrial sectors, and macro variables — then the AI
+          justifies the chain and flags the non-obvious second-order effect.
         </p>
       </header>
 
-      <div className="flex flex-wrap items-end gap-4 card p-5">
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-405 text-slate-400">Cause</label>
+      <div className="flex flex-wrap items-end gap-4 rounded-lg border border-slate-800 bg-slate-900 p-4">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] uppercase tracking-wider text-slate-500">Cause</label>
           <select
             value={causeId}
             onChange={(e) => setCauseId(e.target.value)}
-            className="min-w-[280px] input-op font-medium"
+            className="min-w-[280px] rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-indigo-500 focus:outline-none"
           >
             {Object.entries(groupedCauses).map(([type, list]) => (
               <optgroup key={type} label={CAUSE_TYPE_LABEL[type] ?? type}>
@@ -186,9 +187,9 @@ export default function ImpactCascade() {
             ))}
           </select>
         </div>
-        <div className="flex flex-col gap-2">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Intensity: {(intensity * 100).toFixed(0)}%
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] uppercase tracking-wider text-slate-500">
+            Intensity {(intensity * 100).toFixed(0)}%
           </label>
           <input
             type="range"
@@ -197,54 +198,54 @@ export default function ImpactCascade() {
             step={0.05}
             value={intensity}
             onChange={(e) => setIntensity(Number(e.target.value))}
-            className="w-40 accent-blue-600 cursor-pointer"
+            className="w-40"
           />
         </div>
         <button
           type="button"
           onClick={trace}
           disabled={loading}
-          className="btn-accent px-5 py-2 text-xs font-semibold bg-blue-600 border-blue-600 text-white hover:bg-blue-700 hover:border-blue-700 disabled:opacity-50 h-[38px] flex items-center justify-center min-w-[120px]"
+          className="rounded-md border border-indigo-500/60 bg-indigo-500/20 px-4 py-1.5 text-sm font-semibold text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
         >
-          {loading ? 'Tracing...' : 'Trace Cascade'}
+          {loading ? 'Tracing...' : 'Trace cascade'}
         </button>
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: '#ef4444' }} />severe</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: '#f97316' }} />high</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: '#f59e0b' }} />moderate</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: '#10b981' }} />low</span>
+        <div className="ml-auto flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500">
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: '#ef4444' }} />severe</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: '#f97316' }} />high</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: '#f59e0b' }} />moderate</span>
+          <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: '#10b981' }} />low</span>
         </div>
       </div>
 
       {selectedCause && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-500 font-medium shadow-sm">
-          <span className="font-bold text-slate-700">{selectedCause.label}</span>
-          {selectedCause.region && <span className="ml-2 text-slate-400">· {selectedCause.region}</span>}
-          {selectedCause.description && <span className="ml-2 text-slate-400 font-normal">— {selectedCause.description}</span>}
+        <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-2 text-xs text-slate-400">
+          <span className="font-semibold text-slate-300">{selectedCause.label}</span>
+          {selectedCause.region && <span className="ml-2 text-slate-500">· {selectedCause.region}</span>}
+          {selectedCause.description && <span className="ml-2">— {selectedCause.description}</span>}
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-medium">{error}</div>
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">{error}</div>
       )}
 
       {result && (
         <>
-          <section className="card p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-800">Cascade Flow</h2>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+          <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-100">Cascade flow</h2>
+              <span className="text-[10px] text-slate-500">
                 {result.nodeCount} nodes · {result.edgesUsed.length} transmission edges
               </span>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-[120px,1fr,1fr,1fr]">
               <div className="flex min-w-0 flex-col">
-                <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Cause</div>
+                <div className="mb-2 text-[10px] uppercase tracking-wider text-slate-500">Cause</div>
                 <div
-                  className="rounded-lg border px-3 py-2.5 flex items-center justify-center text-center font-bold bg-indigo-50/50"
-                  style={{ borderColor: '#6366f133' }}
+                  className="rounded-md border px-3 py-2"
+                  style={{ borderColor: '#6366f155', background: 'rgba(99,102,241,0.12)' }}
                 >
-                  <span className="text-xs text-indigo-700">{result.causeLabel}</span>
+                  <span className="text-xs text-indigo-200">{result.causeLabel}</span>
                 </div>
               </div>
               <Column
@@ -267,22 +268,22 @@ export default function ImpactCascade() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-emerald-250 bg-emerald-50/50 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between border-b border-emerald-200 px-5 py-4 bg-emerald-100/30">
+          <section className="rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+            <div className="flex items-center justify-between border-b border-emerald-500/20 px-5 py-3">
               <div>
-                <div className="text-[9px] font-bold uppercase tracking-wider text-emerald-700">
+                <div className="text-[10px] uppercase tracking-wider text-emerald-400/80">
                   AI cascade justification
                 </div>
-                <h3 className="text-sm font-bold text-emerald-800 mt-0.5">
+                <h3 className="text-sm font-semibold text-emerald-100">
                   Why this chain reaction, and what to watch
                 </h3>
               </div>
-              <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-slate-400">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
                 {result.model}
               </span>
             </div>
             <div className="px-5 py-4">
-              <p className="whitespace-pre-line text-xs leading-relaxed text-slate-650 font-medium">
+              <p className="whitespace-pre-line text-sm leading-relaxed text-slate-200">
                 {result.narrative || 'No narrative generated.'}
               </p>
             </div>
