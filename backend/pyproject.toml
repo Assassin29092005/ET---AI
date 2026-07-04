@@ -7,7 +7,7 @@ name = "ps2-energy-resilience"
 version = "0.1.0"
 description = "AI-Driven Energy Supply Chain Resilience for Import-Dependent Economies (ET AI Hackathon 2026, PS2)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
     { name = "ET AI Hackathon 2026 Team" }

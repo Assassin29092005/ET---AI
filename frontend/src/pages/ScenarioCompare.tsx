@@ -5,7 +5,7 @@ import {
   runScenarioByName,
   type ScenarioMeta,
 } from '@/lib/api';
-import { COMMODITY_LABEL, CORRIDOR_LABEL, type ScenarioResult } from '@/lib/types';
+import { CORRIDOR_LABEL, type ScenarioResult } from '@/lib/types';
 
 type Direction = 'better' | 'worse' | 'flat';
 
@@ -30,14 +30,15 @@ function fmtDelta(delta: number, format: 'pct' | 'bps' | 'days' | 'usd'): string
     case 'days':
       return `${sign}${delta.toFixed(1)} d`;
     case 'usd':
-      return `${sign}$${Math.abs(delta).toFixed(2)}`;
+      return `$${Math.abs(delta).toFixed(2)}`;
   }
 }
 
-function dirColor(dir: Direction): string {
-  if (dir === 'worse') return 'text-red-300';
-  if (dir === 'better') return 'text-emerald-300';
-  return 'text-slate-500';
+function dirColor(dir: Direction, format: 'pct' | 'bps' | 'days' | 'usd'): string {
+  if (format === 'usd') return 'text-amber-600 font-bold';
+  if (dir === 'worse') return 'text-red-600 font-bold';
+  if (dir === 'better') return 'text-emerald-600 font-bold';
+  return 'text-slate-450 font-semibold';
 }
 
 function MetricRow({
@@ -57,18 +58,20 @@ function MetricRow({
 }) {
   const d = deltaInfo(a, b, lowerIsBetter);
   return (
-    <div className="grid grid-cols-[1fr,140px,140px] items-baseline gap-3 border-b border-slate-800 py-3">
-      <span className="text-xs uppercase tracking-wider text-slate-400">{label}</span>
-      <span className="text-right font-mono tabular-nums text-slate-200">
+    <div className="grid grid-cols-[1fr,140px,140px] items-center gap-3 border-b border-slate-100 py-3.5 px-5 hover:bg-slate-50/50 transition-colors">
+      <span className="text-xs font-semibold text-slate-500">{label}</span>
+      <span className="text-right font-mono tabular-nums text-slate-800 font-bold text-sm">
         {a.toFixed(format === 'bps' ? 0 : 2)}
-        {unit && <span className="ml-1 text-[10px] text-slate-500">{unit}</span>}
+        {unit && <span className="ml-1 text-[10px] text-slate-400 font-semibold lowercase font-sans">{unit}</span>}
       </span>
       <div className="text-right">
-        <span className="font-mono tabular-nums text-slate-200">
+        <span className="font-mono tabular-nums text-slate-800 font-bold text-sm">
           {b.toFixed(format === 'bps' ? 0 : 2)}
-          {unit && <span className="ml-1 text-[10px] text-slate-500">{unit}</span>}
+          {unit && <span className="ml-1 text-[10px] text-slate-400 font-semibold lowercase font-sans">{unit}</span>}
         </span>
-        <div className={`text-[11px] font-mono ${dirColor(d.dir)}`}>{fmtDelta(d.delta, format)}</div>
+        <div className={`text-[10px] font-mono mt-0.5 ${dirColor(d.dir, format)}`}>
+          {fmtDelta(d.delta, format)}
+        </div>
       </div>
     </div>
   );
@@ -115,22 +118,25 @@ export default function ScenarioCompare() {
   const metaB = scenarios.find((s) => s.name === b);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      {/* Header section matching image */}
       <header>
-        <p className="text-[11px] uppercase tracking-[0.2em] text-indigo-400">Comparison</p>
-        <h1 className="mt-1 text-xl font-semibold text-slate-100">Scenario A vs scenario B</h1>
-        <p className="mt-1 text-xs text-slate-400">
-          Run two scenarios side by side. Deltas computed B − A. Red = worse, green = better.
+        <p className="text-[10px] uppercase tracking-wider text-blue-600 font-bold">Comparison</p>
+        <h1 className="mt-1 text-2xl font-bold text-white leading-tight">Scenario Comparison</h1>
+        <p className="mt-1.5 text-xs text-slate-400 font-medium">
+          Run two scenarios side by side. Deltas computed B - A. Red = worse, green = better.
         </p>
       </header>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-          <label className="text-[10px] uppercase tracking-wider text-slate-500">Scenario A</label>
+      {/* Scenario selection cards */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Scenario A Card */}
+        <div className="card p-5">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scenario A</label>
           <select
             value={a}
             onChange={(e) => setA(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+            className="mt-1.5 w-full input-op font-medium"
           >
             {scenarios.map((s) => (
               <option key={s.name} value={s.name}>
@@ -139,22 +145,22 @@ export default function ScenarioCompare() {
             ))}
           </select>
           {metaA && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
-                {COMMODITY_LABEL[metaA.primary_commodity]}
-              </span>
-              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
-                {CORRIDOR_LABEL[metaA.primary_corridor]}
+            <div className="mt-2.5 flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0" />
+              <span className="rounded bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700 shadow-sm">
+                {CORRIDOR_LABEL[metaA.primary_corridor] ?? metaA.primary_corridor}
               </span>
             </div>
           )}
         </div>
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-          <label className="text-[10px] uppercase tracking-wider text-slate-500">Scenario B</label>
+
+        {/* Scenario B Card */}
+        <div className="card p-5">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Scenario B</label>
           <select
             value={b}
             onChange={(e) => setB(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+            className="mt-1.5 w-full input-op font-medium"
           >
             {scenarios.map((s) => (
               <option key={s.name} value={s.name}>
@@ -163,12 +169,10 @@ export default function ScenarioCompare() {
             ))}
           </select>
           {metaB && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
-                {COMMODITY_LABEL[metaB.primary_commodity]}
-              </span>
-              <span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">
-                {CORRIDOR_LABEL[metaB.primary_corridor]}
+            <div className="mt-2.5 flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-500 shrink-0" />
+              <span className="rounded bg-red-50 border border-red-200 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-red-700 shadow-sm">
+                {CORRIDOR_LABEL[metaB.primary_corridor] ?? metaB.primary_corridor}
               </span>
             </div>
           )}
@@ -176,23 +180,24 @@ export default function ScenarioCompare() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">{error}</div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-medium">{error}</div>
       )}
 
       {loading && !resultA && (
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-6 text-sm text-slate-500">
-          Running both scenarios...
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-450 font-medium shadow-sm">
+          Running comparison...
         </div>
       )}
 
       {resultA && resultB && (
-        <div className="rounded-lg border border-slate-800 bg-slate-900">
-          <div className="grid grid-cols-[1fr,140px,140px] gap-3 border-b border-slate-800 px-4 py-2 text-[10px] uppercase tracking-wider text-slate-500">
+        /* Full-Width Metrics Comparison Table */
+        <div className="card overflow-hidden">
+          <div className="grid grid-cols-[1fr,140px,140px] gap-3 border-b border-slate-200 px-5 py-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50">
             <span>Metric</span>
             <span className="text-right">A</span>
             <span className="text-right">B</span>
           </div>
-          <div className="px-4">
+          <div className="bg-white">
             <MetricRow
               label="Brent projected"
               a={resultA.projected.brentUsd}
@@ -224,7 +229,7 @@ export default function ScenarioCompare() {
               a={resultA.projected.importCostUsdM}
               b={resultB.projected.importCostUsdM}
               format="usd"
-              unit="M"
+              unit="m"
             />
           </div>
         </div>
