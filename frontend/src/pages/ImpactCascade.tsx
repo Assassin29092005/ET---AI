@@ -21,13 +21,6 @@ function severityColor(s: number): string {
   return '#10b981';
 }
 
-function severityBg(s: number): string {
-  if (s >= 0.6) return 'rgba(239,68,68,0.12)';
-  if (s >= 0.4) return 'rgba(249,115,22,0.12)';
-  if (s >= 0.2) return 'rgba(245,158,11,0.12)';
-  return 'rgba(16,185,129,0.10)';
-}
-
 function fmtPrice(v: number): string {
   if (v >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
   if (v >= 10) return v.toFixed(1);

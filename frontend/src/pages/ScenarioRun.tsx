@@ -24,7 +24,7 @@ import {
   type ScenarioResult,
   type SourcingOption,
 } from '@/lib/types';
-import { commodityUnitShort, fmtNumber, fmtTime } from '@/lib/fmt';
+import { commodityUnitShort, fmtNumber } from '@/lib/fmt';
 import CommodityBadge from '@/components/CommodityBadge';
 import NarrativeFeed from '@/components/NarrativeFeed';
 import CostStrip from '@/components/CostStrip';

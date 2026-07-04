@@ -12,12 +12,6 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-} from 'recharts';
-import {
   getTwinState,
   postImpactCascade,
   type ImpactCascadeResponse,
@@ -135,12 +129,6 @@ const VEDAS_LAYER_OIL = 'petrolium_products_pipeline';
 const VEDAS_ATTRIBUTION =
   '<a href="https://vedas.sac.gov.in/energymap/" target="_blank" rel="noopener">Pipelines © VEDAS / ISRO SAC</a>';
 
-const DONUT_DATA = [
-  { name: 'Oil', value: 45, fill: '#3b82f6' },
-  { name: 'Gas', value: 25, fill: '#475569' },
-  { name: 'Gas', value: 20, fill: '#10b981' },
-  { name: 'Other', value: 10, fill: '#cbd5e1' },
-];
 
 function ToggleSwitch({
   checked,
@@ -195,6 +183,50 @@ export default function DigitalTwin() {
     loading: false,
   });
   const [selectedWhatIfCorridor, setSelectedWhatIfCorridor] = useState<Corridor | ''>('');
+  const [mapFocused, setMapFocused] = useState<boolean>(false);
+
+  const handleMapClick = () => {
+    setMapFocused(!mapFocused);
+  };
+
+  const handleDocumentClick = (e: MouseEvent) => {
+    const mapElement = document.querySelector('.leaflet-container');
+    if (mapElement && !mapElement.contains(e.target as Node)) {
+      setMapFocused(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mapFocused) {
+      document.addEventListener('click', handleDocumentClick);
+      return () => {
+        document.removeEventListener('click', handleDocumentClick);
+      };
+    }
+  }, [mapFocused]);
+
+  useEffect(() => {
+    const mapElement = document.querySelector('.leaflet-container') as HTMLElement;
+    if (!mapElement) return;
+
+    const handleMapWheel = (e: WheelEvent) => {
+      if (!mapFocused) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const scrollableParent = document.querySelector('main');
+        if (scrollableParent) {
+          scrollableParent.scrollTop += e.deltaY;
+          scrollableParent.scrollLeft += e.deltaX;
+        }
+      }
+    };
+
+    mapElement.addEventListener('wheel', handleMapWheel, { passive: false });
+    return () => {
+      mapElement.removeEventListener('wheel', handleMapWheel);
+    };
+  }, [mapFocused]);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,20 +345,27 @@ export default function DigitalTwin() {
         <aside className="flex flex-col gap-4">
           {/* Quick Actions */}
           <div className="card p-5 flex flex-col gap-4">
-            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">Quick Actions</h3>
+            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">Toggle Map Layers</h3>
             <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Toggle Map Layers</span>
               <ToggleSwitch
-                checked={layers.oilPipelines || layers.gasPipelines || layers.vedasOverlay}
-                onChange={() =>
-                  setLayers((prev) => ({
-                    ...prev,
-                    oilPipelines: !prev.oilPipelines,
-                    gasPipelines: !prev.gasPipelines,
-                    vedasOverlay: !prev.vedasOverlay,
-                  }))
-                }
-                label="Pipelines"
+                checked={layers.routes}
+                onChange={() => setLayers((prev) => ({ ...prev, routes: !prev.routes }))}
+                label="Supply Routes"
+              />
+              <ToggleSwitch
+                checked={layers.corridors}
+                onChange={() => setLayers((prev) => ({ ...prev, corridors: !prev.corridors }))}
+                label="Corridors"
+              />
+              <ToggleSwitch
+                checked={layers.refineries}
+                onChange={() => setLayers((prev) => ({ ...prev, refineries: !prev.refineries }))}
+                label="Refineries"
+              />
+              <ToggleSwitch
+                checked={layers.lng}
+                onChange={() => setLayers((prev) => ({ ...prev, lng: !prev.lng }))}
+                label="LNG Terminals"
               />
               <ToggleSwitch
                 checked={layers.ports}
@@ -334,9 +373,34 @@ export default function DigitalTwin() {
                 label="Ports"
               />
               <ToggleSwitch
-                checked={layers.routes}
-                onChange={() => setLayers((prev) => ({ ...prev, routes: !prev.routes }))}
-                label="Routes"
+                checked={layers.distribution}
+                onChange={() => setLayers((prev) => ({ ...prev, distribution: !prev.distribution }))}
+                label="Distribution"
+              />
+              <ToggleSwitch
+                checked={layers.oilPipelines}
+                onChange={() => setLayers((prev) => ({ ...prev, oilPipelines: !prev.oilPipelines }))}
+                label="Oil Pipelines"
+              />
+              <ToggleSwitch
+                checked={layers.gasPipelines}
+                onChange={() => setLayers((prev) => ({ ...prev, gasPipelines: !prev.gasPipelines }))}
+                label="Gas Pipelines"
+              />
+              <ToggleSwitch
+                checked={layers.vessels}
+                onChange={() => setLayers((prev) => ({ ...prev, vessels: !prev.vessels }))}
+                label="AIS Vessels"
+              />
+              <ToggleSwitch
+                checked={layers.sources}
+                onChange={() => setLayers((prev) => ({ ...prev, sources: !prev.sources }))}
+                label="Foreign Sources"
+              />
+              <ToggleSwitch
+                checked={layers.vedasOverlay}
+                onChange={() => setLayers((prev) => ({ ...prev, vedasOverlay: !prev.vedasOverlay }))}
+                label="VEDAS Overlay (ISRO)"
               />
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
@@ -360,48 +424,6 @@ export default function DigitalTwin() {
                 </svg>
                 <span className="text-[10px] font-bold text-slate-700">Generate Report</span>
               </button>
-            </div>
-          </div>
-
-          {/* Filter By */}
-          <div className="card p-5 flex flex-col gap-4">
-            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2">Filter By</h3>
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Country</label>
-                <select className="input-op w-full font-medium">
-                  <option>Country</option>
-                  <option>India</option>
-                  <option>Saudi Arabia</option>
-                  <option>Russia</option>
-                  <option>Iraq</option>
-                  <option>UAE</option>
-                </select>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Commodity</label>
-                <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border border-slate-200 bg-white">
-                  <span className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
-                    Oil <span className="cursor-pointer text-[9px] text-blue-400 font-bold hover:text-blue-600">×</span>
-                  </span>
-                  <span className="flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
-                    Gas <span className="cursor-pointer text-[9px] text-blue-400 font-bold hover:text-blue-600">×</span>
-                  </span>
-                  <span className="flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
-                    Et...
-                  </span>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Vessel Type</label>
-                <select className="input-op w-full font-medium">
-                  <option>Vessel Type</option>
-                  <option>Crude Tanker</option>
-                  <option>LNG Carrier</option>
-                  <option>LPG Carrier</option>
-                  <option>Product Tanker</option>
-                </select>
-              </div>
             </div>
           </div>
 
@@ -461,11 +483,14 @@ export default function DigitalTwin() {
 
         {/* Map Column */}
         <div className="flex flex-col gap-4 min-w-0">
-          <div className="flex-1 min-h-[500px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm relative">
+          <div
+            className="flex-1 min-h-[500px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm relative"
+            onClick={handleMapClick}
+          >
             <MapContainer
               center={[16, 72]}
               zoom={4}
-              scrollWheelZoom={true}
+              scrollWheelZoom={mapFocused}
               style={{ height: '100%', width: '100%', background: '#f8fafc' }}
               worldCopyJump={true}
             >
@@ -786,136 +811,72 @@ export default function DigitalTwin() {
 
         {/* Right Sidebar */}
         <aside className="flex flex-col gap-4">
-          {/* Analytics Stats Grid */}
+          {/* Infrastructure Stats Grid */}
           <div className="grid grid-cols-2 gap-3">
             <div className="card p-4">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Total Vessels in Transit</div>
-              <div className="mt-1.5 text-2xl font-bold font-mono tracking-tight tabular-nums text-slate-800">
-                {state ? state.vessels : '17'}
-              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Refineries</div>
+              <div className="mt-1.5 text-2xl font-bold font-mono text-slate-800">{refineries.length}</div>
+              <div className="text-[8px] text-slate-500 mt-1">{refineries.reduce((sum, r) => sum + (r.capacityMmtpa || 0), 0).toFixed(0)} MMTPA</div>
             </div>
             <div className="card p-4">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 font-bold">Total Vessels in Transit</div>
-              <div className="mt-1.5 text-2xl font-bold font-mono tracking-tight tabular-nums text-slate-800">
-                1,233
-              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">LNG Terminals</div>
+              <div className="mt-1.5 text-2xl font-bold font-mono text-slate-800">{lngTerminals.length}</div>
+              <div className="text-[8px] text-slate-500 mt-1">{lngTerminals.reduce((sum, t) => sum + (t.capacityMtpa || 0), 0).toFixed(0)} MTPA</div>
             </div>
             <div className="card p-4">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Open Route Capacity %</div>
-              <div className="mt-1.5 text-2xl font-bold font-mono tracking-tight tabular-nums text-slate-800">
-                83%
-              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Oil Pipelines</div>
+              <div className="mt-1.5 text-2xl font-bold font-mono text-slate-800">{oilPipelines.length}</div>
+              <div className="text-[8px] text-slate-500 mt-1">8k km - VEDAS</div>
             </div>
             <div className="card p-4">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Open Route Capacity %</div>
-              <div className="mt-1.5 text-2xl font-bold font-mono tracking-tight tabular-nums text-slate-800">
-                67.7%
-              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Gas Pipelines</div>
+              <div className="mt-1.5 text-2xl font-bold font-mono text-slate-800">{gasPipelines.length}</div>
+              <div className="text-[8px] text-slate-500 mt-1">9k km - VEDAS</div>
             </div>
           </div>
 
-          {/* Top Commodity Flows */}
-          <div className="card p-4 flex flex-col items-center">
-            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 w-full text-left">Top Commodity Flows</h3>
-            <div className="h-36 w-full flex items-center justify-center relative mt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={DONUT_DATA}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={36}
-                    outerRadius={56}
-                    paddingAngle={3}
-                    strokeWidth={0}
-                  >
-                    {DONUT_DATA.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Flows</span>
-                <span className="text-base font-bold text-slate-700">100%</span>
-              </div>
-            </div>
-            {/* Legend row */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-3 text-[10px] w-full px-2">
-              <div className="flex items-center gap-1.5 font-semibold text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                Commodity / Oil
-              </div>
-              <div className="flex items-center gap-1.5 font-semibold text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-600" />
-                Gas
-              </div>
-              <div className="flex items-center gap-1.5 font-semibold text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Gas / Coal
-              </div>
-              <div className="flex items-center gap-1.5 font-semibold text-slate-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                Other
-              </div>
-            </div>
-          </div>
-
-          {/* Critical Route Risk */}
+          {/* Corridors Status */}
           <div className="card p-4">
-            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-2.5">Critical Route Risk</h3>
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between text-xs py-1">
-                <span className="font-semibold text-slate-600">Suez Canal Blockage</span>
-                <span className="rounded bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-700 border border-amber-200">ember</span>
-              </div>
-              <div className="flex items-center justify-between text-xs py-1">
-                <span className="font-semibold text-slate-600">Strait of Hormuz Tension</span>
-                <span className="rounded bg-red-50 px-2 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">critical</span>
-              </div>
-              <div className="flex items-center justify-between text-xs py-1">
-                <span className="font-semibold text-slate-600">South China Sea</span>
-                <span className="rounded bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-700 border border-emerald-200">good</span>
-              </div>
-            </div>
+            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-2.5">Corridors</h3>
+            <ul className="space-y-2 text-[11px]">
+              {corridors.map((c) => (
+                <li key={c.corridor} className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: STATUS_FILL[c.status] ?? '#94a3b8' }}
+                    />
+                    {CORRIDOR_LABEL[c.corridor] ?? c.corridor}
+                  </span>
+                  <span className="flex items-center gap-1.5 tabular-nums text-slate-500">
+                    <span className={`font-mono text-[10px] uppercase ${c.status === 'open' ? 'text-emerald-600' : c.status === 'congested' ? 'text-amber-600' : 'text-orange-600'}`}>
+                      {c.status}
+                    </span>
+                    <span>{c.vesselCount}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
 
-          {/* System Health */}
-          <div className="card p-4">
-            <h3 className="text-xs font-bold text-slate-800 border-b border-slate-100 pb-2 mb-2.5">System Health</h3>
-            <div className="flex flex-col gap-2 text-[10px] text-slate-500 font-semibold">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  Health
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="h-0.5 w-4 bg-slate-400" />
-                  Route/Port status
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  Elevated
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <svg className="h-3.5 w-3.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                  </svg>
-                  Distribution
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-red-500" />
-                  Good
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <svg className="h-3.5 w-3.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Vessels
+          {/* Network Legend */}
+          <div className="card p-3">
+            <div className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">Network legend</div>
+            <div className="flex flex-col gap-1 text-[11px]">
+              <LegendDot color={REFINERY_COLOR} label="Refinery (size = capacity)" />
+              <LegendDot color={LNG_COLOR} label="LNG terminal" />
+              <LegendDot color={PORT_COLOR} label="Distribution port" />
+              <LegendDot color={SOURCE_COLOR} label="Foreign source" />
+              <LegendDot color={OIL_PIPELINE_COLOR} label="Oil pipeline" />
+              <LegendDot color={GAS_PIPELINE_COLOR} label="Gas pipeline (dashed)" />
+              <LegendDot color="#f472b6" label="VEDAS WMS overlay (ISRO)" />
+              <LegendDot color={VESSEL_COLOR.crude} label="Vessel (color = cargo)" />
+              <div className="mt-1 border-t border-slate-200 pt-1.5">
+                <div className="mb-1 text-slate-500 text-[10px]">Route / corridor status</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(STATUS_FILL).map(([k]) => (
+                    <LegendDot key={k} color={STATUS_FILL[k]} label={k} />
+                  ))}
                 </div>
               </div>
             </div>
@@ -990,6 +951,15 @@ function ImpactList({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+      <span className="text-slate-500">{label}</span>
     </div>
   );
 }
