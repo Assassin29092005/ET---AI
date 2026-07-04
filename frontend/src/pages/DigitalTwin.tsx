@@ -25,7 +25,6 @@ import {
 } from '@/lib/api';
 import { CORRIDOR_LABEL, type Corridor } from '@/lib/types';
 import { fmtNumber, fmtTime } from '@/lib/fmt';
-import CommodityBadge from '@/components/CommodityBadge';
 
 const WHATIF_CAUSE: Record<Corridor, string> = {
   hormuz: 'corridor:hormuz',
@@ -54,27 +53,11 @@ const CORRIDOR_COORDS: Record<Corridor, { lat: number; lon: number; label: strin
   suez: { lat: 30.0, lon: 32.5, label: 'Suez' },
 };
 
-const CORRIDOR_TO_SCENARIO: Record<Corridor, string> = {
-  hormuz: 'hormuz_partial_closure',
-  bab_el_mandeb: 'red_sea_suspension',
-  malacca: 'australia_coking_coal',
-  south_china_sea: 'china_rare_earth_curbs',
-  cape_of_good_hope: 'red_sea_suspension',
-  suez: 'red_sea_suspension',
-};
-
 const STATUS_FILL: Record<string, string> = {
   open: '#10b981',
   congested: '#f59e0b',
   disrupted: '#f97316',
   closed: '#ef4444',
-};
-
-const STATUS_PILL_TEXT: Record<string, string> = {
-  open: 'text-emerald-600',
-  congested: 'text-amber-600',
-  disrupted: 'text-orange-600',
-  closed: 'text-red-600',
 };
 
 const REFINERY_COLOR = '#f59e0b';
@@ -145,7 +128,6 @@ const VESSEL_COLOR: Record<string, string> = {
 
 const OIL_PIPELINE_COLOR = '#a78bfa';
 const GAS_PIPELINE_COLOR = '#22d3ee';
-const VEDAS_OVERLAY_COLOR = '#f472b6';
 
 const VEDAS_WMS_URL = 'https://vedas.sac.gov.in/secure/geoserver/powergis_private/wms';
 const VEDAS_LAYER_GAS = 'natural_gas_pipeline';
