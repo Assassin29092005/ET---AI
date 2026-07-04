@@ -29,14 +29,14 @@ const VESSEL_COLOR: Record<string, string> = {
 
 const refineryIcon = L.divIcon({
   className: "",
-  html: '<div style="width:10px;height:10px;background:#f59e0b;border:2px solid #ffffff;box-shadow: 0 1px 3px rgba(0,0,0,0.3);transform:rotate(45deg)"></div>',
+  html: '<div style="width:10px;height:10px;background:#f59e0b;border:2px solid #1e293b;transform:rotate(45deg)"></div>',
   iconSize: [10, 10],
   iconAnchor: [5, 5],
 });
 
 const terminalIcon = L.divIcon({
   className: "",
-  html: '<div style="width:10px;height:10px;background:#6366f1;border:2px solid #ffffff;box-shadow: 0 1px 3px rgba(0,0,0,0.3);border-radius:2px"></div>',
+  html: '<div style="width:10px;height:10px;background:#6366f1;border:2px solid #1e293b;border-radius:2px"></div>',
   iconSize: [10, 10],
   iconAnchor: [5, 5],
 });
@@ -52,14 +52,14 @@ export function VesselMap({
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-slate-200 shadow-card"
+      className="overflow-hidden rounded-lg border border-slate-800"
       style={{ height }}
     >
       <MapContainer
         center={center}
         zoom={4}
         scrollWheelZoom={true}
-        style={{ height: "100%", width: "100%", background: "#F3F4F6" }}
+        style={{ height: "100%", width: "100%", background: "#0f172a" }}
       >
         <TileLayer
           attribution='&copy; OpenStreetMap contributors'

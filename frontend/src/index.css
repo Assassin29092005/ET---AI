@@ -6,20 +6,20 @@
 
 @layer base {
   :root {
-    --op-bg: #0E1B30;
-    --op-panel: #FFFFFF;
-    --op-panel2: #F8FAFC;
-    --op-panel3: #F1F5F9;
-    --op-border: #E5E7EB;
-    --op-borderStrong: #D1D5DB;
-    --op-ink: #1A2744;
-    --op-ink2: #374151;
-    --op-ink3: #6B7280;
-    --op-accent: #2563EB;
-    --op-accentSoft: rgba(37, 99, 235, 0.08);
-    --op-warn: #F59E0B;
-    --op-danger: #EF4444;
-    --op-good: #10B981;
+    --op-bg: #0a0a0b;
+    --op-panel: #0f0f12;
+    --op-panel2: #15161a;
+    --op-panel3: #1c1d22;
+    --op-border: #1f2024;
+    --op-borderStrong: #2a2c33;
+    --op-ink: #e8e9ed;
+    --op-ink2: #9b9da8;
+    --op-ink3: #5b5d68;
+    --op-accent: #00d4aa;
+    --op-accentSoft: rgba(0, 212, 170, 0.12);
+    --op-warn: #f59e0b;
+    --op-danger: #ef4444;
+    --op-good: #10b981;
   }
 
   html,
@@ -39,7 +39,7 @@
   }
 
   ::selection {
-    background-color: rgba(37, 99, 235, 0.20);
+    background-color: rgba(0, 212, 170, 0.30);
     color: inherit;
   }
 
@@ -47,46 +47,46 @@
   input,
   select,
   textarea {
-    color-scheme: light;
+    color-scheme: dark;
   }
 
   /* Subtle scrollbar in dark surfaces */
   *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   *::-webkit-scrollbar-track {
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: #243B5E;
+    background: #1f2024;
     border: 2px solid var(--op-bg);
     border-radius: 8px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #3B5A8A;
+    background: #2a2c33;
   }
 }
 
 @layer components {
   .panel {
-    @apply bg-op-panel border border-op-border rounded-lg shadow-card;
+    @apply bg-op-panel border border-op-border rounded-md;
   }
 
   .panel-2 {
-    @apply bg-op-panel2 border border-op-border rounded-lg;
+    @apply bg-op-panel2 border border-op-border rounded-md;
   }
 
   .panel-3 {
-    @apply bg-op-panel3 border border-op-borderStrong rounded-lg;
+    @apply bg-op-panel3 border border-op-borderStrong rounded-md;
   }
 
   .label-micro {
-    @apply text-micro uppercase tracking-wider text-op-ink3 font-medium;
+    @apply text-micro uppercase tracking-wider text-op-ink3;
   }
 
   .stat-label {
-    @apply text-micro uppercase tracking-wider text-op-ink3 font-medium;
+    @apply text-micro uppercase tracking-wider text-op-ink3;
   }
 
   .stat-value {
@@ -102,102 +102,31 @@
   }
 
   .btn-ghost {
-    @apply rounded-lg border border-op-borderStrong bg-transparent px-3 py-1.5 text-sm text-op-ink hover:bg-op-panel2 hover:text-op-accent transition-colors duration-150;
+    @apply rounded-md border border-op-borderStrong bg-transparent px-3 py-1.5 text-sm text-op-ink hover:bg-op-panel2 transition-colors duration-150;
   }
 
   .btn-accent {
-    @apply rounded-lg border border-op-accent bg-op-accentSoft px-3 py-1.5 text-sm font-medium text-op-accent hover:bg-op-accent hover:text-white transition-colors duration-150;
+    @apply rounded-md border border-op-accent bg-op-accentSoft px-3 py-1.5 text-sm font-medium text-op-accent hover:bg-op-accent/15 transition-colors duration-150;
   }
 
   .input-op {
-    @apply rounded-lg border border-op-border bg-slate-50 px-2.5 py-1.5 text-sm text-op-ink placeholder-op-ink3 focus:border-op-accent focus:bg-white focus:outline-none focus:ring-1 focus:ring-op-accent;
+    @apply rounded-md border border-op-border bg-op-bg px-2.5 py-1.5 text-sm text-op-ink placeholder-op-ink3 focus:border-op-accent focus:outline-none focus:ring-1 focus:ring-op-accent;
   }
 
   .table-op {
     @apply w-full text-sm;
   }
   .table-op thead th {
-    @apply text-micro uppercase tracking-wider text-op-ink3 font-medium text-left px-3 py-2 border-b border-op-border bg-slate-50;
+    @apply text-micro uppercase tracking-wider text-op-ink3 font-medium text-left px-3 py-2 border-b border-op-border;
   }
   .table-op tbody td {
-    @apply px-3 py-2 border-b border-op-border text-op-ink2;
+    @apply px-3 py-2 border-b border-op-border text-op-ink;
   }
   .table-op tbody tr:hover {
     background-color: var(--op-panel2);
   }
   .table-op .num {
     @apply font-mono tabular-nums text-right;
-  }
-
-  /* Custom utility components */
-  .card {
-    @apply bg-white border border-op-border rounded-xl shadow-card transition-all duration-150;
-  }
-  .card:hover {
-    @apply shadow-card-hover;
-  }
-  .badge {
-    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium border;
-  }
-  .progress-bar-container {
-    @apply w-full h-2 bg-slate-100 rounded-full overflow-hidden;
-  }
-  .progress-bar-fill {
-    @apply h-full rounded-full transition-all duration-300;
-  }
-}
-
-/* ---------------------------------------------------------------------------
-   Shared design-system primitives extracted from the feature-overview design.
-   Additive only — new class names that never override existing components.
-   Semantic status color stays separate from the accent hue.
-   --------------------------------------------------------------------------- */
-@layer components {
-  /* Semantic chips: risk tiers + status. Pair with the <Chip> component. */
-  .chip {
-    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none whitespace-nowrap;
-  }
-  .chip-crit    { @apply bg-red-100 text-red-700 border-red-200; }
-  .chip-high    { @apply bg-orange-100 text-orange-700 border-orange-200; }
-  .chip-elev    { @apply bg-amber-100 text-amber-700 border-amber-200; }
-  .chip-low     { @apply bg-emerald-100 text-emerald-700 border-emerald-200; }
-  .chip-clear   { @apply bg-emerald-100 text-emerald-700 border-emerald-200; }
-  .chip-flag    { @apply bg-amber-100 text-amber-700 border-amber-200; }
-  .chip-block   { @apply bg-red-100 text-red-700 border-red-200; }
-  .chip-neutral { @apply bg-slate-100 text-slate-600 border-slate-200; }
-  .chip-accent  { @apply bg-op-accentSoft text-op-accent border-blue-200; }
-
-  /* Eyebrow / section header helpers. */
-  .eyebrow-kicker {
-    @apply text-micro uppercase tracking-wider text-op-ink3 font-semibold;
-  }
-  .route-code {
-    @apply font-mono text-[11px] text-op-accent bg-op-accentSoft px-1.5 py-0.5 rounded;
-  }
-
-  /* KPI tile with a left tier accent (color set inline via style). */
-  .kpi-tile {
-    @apply bg-white border border-op-border border-l-4 rounded-xl shadow-card p-4;
-    border-left-color: var(--op-borderStrong);
-  }
-  .kpi-value {
-    @apply text-2xl font-semibold tabular-nums leading-none tracking-tight;
-  }
-
-  /* Mini comparison / share bar. */
-  .mini-bar {
-    @apply h-1.5 w-full rounded-full bg-slate-100 overflow-hidden;
-  }
-  .mini-bar > span {
-    @apply block h-full rounded-full;
-  }
-
-  /* Gantt-style timeline strip. */
-  .gantt-track {
-    @apply relative h-3.5 rounded bg-slate-100 overflow-hidden;
-  }
-  .gantt-track > span {
-    @apply absolute top-0 h-full rounded;
   }
 }
 
@@ -206,7 +135,7 @@
 }
 
 .leaflet-container {
-  background: #F3F4F6;
+  background: #0b0c0f;
   z-index: 0;
   font-family: "Inter", system-ui, sans-serif;
 }
@@ -218,12 +147,11 @@
 }
 
 .leaflet-control-attribution {
-  background: rgba(255, 255, 255, 0.9) !important;
-  color: #6B7280 !important;
+  background: rgba(15, 15, 18, 0.85) !important;
+  color: #9b9da8 !important;
   font-size: 10px !important;
-  border-radius: 4px;
 }
 
 .leaflet-control-attribution a {
-  color: #2563EB !important;
+  color: #00d4aa !important;
 }
