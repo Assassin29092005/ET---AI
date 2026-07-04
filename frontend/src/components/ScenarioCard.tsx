@@ -38,37 +38,37 @@ export function ScenarioCard({
   const tier = scoreToTier(primaryRiskScore);
 
   return (
-    <div className="flex flex-col card p-5 border-slate-200 bg-white">
+    <div className="flex flex-col rounded-lg border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/50">
       <div className="mb-3 flex items-start justify-between gap-2">
         <CommodityBadge commodity={commodity} />
-        <span className="rounded-md border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold text-slate-500">
+        <span className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-xs text-slate-300">
           {CORRIDOR_LABEL[corridor] ?? corridor}
         </span>
       </div>
 
-      <h3 className="text-base font-bold text-slate-800">{title ?? name}</h3>
+      <h3 className="text-base font-semibold text-slate-100">{title ?? name}</h3>
       {description && (
-        <p className="mt-2 line-clamp-3 text-xs text-slate-500 leading-relaxed">{description}</p>
+        <p className="mt-1 line-clamp-3 text-sm text-slate-400">{description}</p>
       )}
 
-      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-100 pt-4 text-xs font-medium">
+      <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-800 pt-3 text-xs">
         <div>
-          <div className="text-slate-400 text-[10px] uppercase font-semibold">Intensity</div>
-          <div className="text-slate-700 font-mono mt-0.5">{(default_intensity * 100).toFixed(0)}%</div>
+          <div className="text-slate-500">Intensity</div>
+          <div className="text-slate-200">{(default_intensity * 100).toFixed(0)}%</div>
         </div>
         <div>
-          <div className="text-slate-400 text-[10px] uppercase font-semibold">Duration</div>
-          <div className="text-slate-700 font-mono mt-0.5">{default_duration_days.toFixed(0)} d</div>
+          <div className="text-slate-500">Duration</div>
+          <div className="text-slate-200">{default_duration_days.toFixed(0)} d</div>
         </div>
         <div>
-          <div className="text-slate-400 text-[10px] uppercase font-semibold mb-0.5">Risk</div>
+          <div className="text-slate-500">Risk</div>
           <RiskBadge tier={tier} score={primaryRiskScore} />
         </div>
       </div>
 
       <button
         onClick={() => navigate(`/scenarios/${name}`)}
-        className="mt-5 w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+        className="mt-4 w-full rounded-md bg-indigo-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-400"
       >
         Run scenario
       </button>

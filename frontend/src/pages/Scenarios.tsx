@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   getScenarios,
@@ -24,25 +24,6 @@ function deltaInfo(a: number, b: number, lowerIsBetter = true): { delta: number;
   return { delta, pct, dir };
 }
 
-function fmtDelta(delta: number, format: 'pct' | 'bps' | 'days' | 'usd'): string {
-  const sign = delta >= 0 ? '+' : '';
-  switch (format) {
-    case 'pct':
-      return `${sign}${delta.toFixed(1)} pp`;
-    case 'bps':
-      return `${sign}${delta.toFixed(0)} bps`;
-    case 'days':
-      return `${sign}${delta.toFixed(1)} d`;
-    case 'usd':
-      return `${sign}$${Math.abs(delta).toFixed(2)}`;
-  }
-}
-
-function dirColor(dir: Direction): string {
-  if (dir === 'worse') return 'text-red-650 font-bold';
-  if (dir === 'better') return 'text-emerald-650 font-bold';
-  return 'text-slate-400 font-semibold';
-}
 
 function MarketMetricRow({
   label,
