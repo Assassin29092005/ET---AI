@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import clsx from "clsx";
 import Dashboard from "@/pages/Dashboard";
 import DigitalTwin from "@/pages/DigitalTwin";
@@ -20,82 +20,7 @@ import { getCommodities, getHealthz } from "@/lib/api";
 import { fmtIstClock } from "@/lib/fmt";
 import type { CommodityPrice } from "@/lib/types";
 
-interface NavGroup {
-  label: string;
-  items: Array<{ to: string; label: string; end?: boolean }>;
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Operations",
-    items: [
-      { to: "/", label: "Dashboard", end: true },
-      { to: "/twin", label: "Digital twin" },
-      { to: "/cascade", label: "Impact cascade" },
-      { to: "/scenarios", label: "Scenarios" },
-      { to: "/compare", label: "Compare" },
-      { to: "/compound", label: "Compound shocks" },
-    ],
-  },
-  {
-    label: "Analytics",
-    items: [
-      { to: "/stress-test", label: "Stress test" },
-      { to: "/backtest", label: "Backtest" },
-      { to: "/sourcing", label: "Sourcing" },
-      { to: "/spr", label: "Strategic reserves" },
-    ],
-  },
-  {
-    label: "System",
-    items: [{ to: "/baselines", label: "Data baselines" }],
-  },
-];
-
-function Sidebar() {
-  return (
-    <aside className="w-[220px] shrink-0 border-r border-op-border bg-op-panel flex flex-col">
-      <div className="px-5 pt-6 pb-5 border-b border-op-border">
-        <div className="text-micro uppercase tracking-wider text-op-ink3">PS2 RESILIENCE</div>
-        <div className="mt-1 font-serif italic text-op-ink2 text-sm leading-tight">
-          India energy intelligence
-        </div>
-      </div>
-      <nav className="px-2 py-3 flex-1 flex flex-col gap-5">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
-            <div className="px-3 mb-2 text-micro uppercase tracking-wider text-op-ink3">
-              {group.label}
-            </div>
-            <div className="flex flex-col gap-px">
-              {group.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    clsx(
-                      "relative px-3 py-1.5 text-sm transition-colors duration-150",
-                      isActive
-                        ? "text-op-ink bg-op-panel2 border-l-2 border-l-op-accent pl-[10px]"
-                        : "text-op-ink2 hover:text-op-ink hover:bg-op-panel2/60",
-                    )
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </div>
-          </div>
-        ))}
-      </nav>
-      <div className="px-5 py-4 border-t border-op-border text-micro uppercase tracking-wider text-op-ink3 font-mono">
-        BUILD v0.2 / 2026
-      </div>
-    </aside>
-  );
-}
-
+// Helper hook for the current clock
 function useIstClock() {
   const [now, setNow] = useState<Date>(() => new Date());
   useEffect(() => {
@@ -105,8 +30,137 @@ function useIstClock() {
   return fmtIstClock(now);
 }
 
-function Header() {
+// Icon Sidebar definitions
+interface SidebarItem {
+  to: string;
+  label: string;
+  icon: JSX.Element;
+}
+
+const SIDEBAR_ITEMS: SidebarItem[] = [
+  {
+    to: "/",
+    label: "Overview",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: "/backtest",
+    label: "Backtest",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
+    to: "/baselines",
+    label: "Baseline",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+      </svg>
+    ),
+  },
+  {
+    to: "/stress-test",
+    label: "Stress Test",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: "/sourcing",
+    label: "Sourcing",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m0 0l-8-4m8 4v10l-8-4m8 4l8-4m-8 4l-8 4" />
+      </svg>
+    ),
+  },
+  {
+    to: "/spr",
+    label: "Reports",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+];
+
+function IconSidebar() {
+  return (
+    <aside className="w-16 shrink-0 border-r border-slate-200 bg-white flex flex-col items-center py-4 gap-4">
+      {SIDEBAR_ITEMS.map((item) => (
+        <NavLink
+          key={item.label}
+          to={item.to}
+          className={({ isActive }) =>
+            clsx(
+              "relative flex items-center justify-center w-12 h-12 rounded-xl transition-all duration-150 group",
+              isActive
+                ? "bg-blue-50 text-blue-600 font-semibold"
+                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50",
+            )
+          }
+          title={item.label}
+        >
+          {item.icon}
+          <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
+            {item.label}
+          </span>
+        </NavLink>
+      ))}
+    </aside>
+  );
+}
+
+// Top navigation tabs definition
+interface TopTab {
+  label: string;
+  to: string;
+  matcher: (path: string) => boolean;
+}
+
+const TOP_TABS: TopTab[] = [
+  {
+    label: "Dashboard",
+    to: "/",
+    matcher: (path) => path === "/",
+  },
+  {
+    label: "Scenario",
+    to: "/scenarios",
+    matcher: (path) =>
+      path.startsWith("/scenarios") ||
+      path.startsWith("/compare"),
+  },
+  {
+    label: "Digital Twin",
+    to: "/twin",
+    matcher: (path) => path.startsWith("/twin") || path.startsWith("/sourcing"),
+  },
+  {
+    label: "Impact Cascade",
+    to: "/cascade",
+    matcher: (path) => path.startsWith("/cascade"),
+  },
+  {
+    label: "Compound Shocks",
+    to: "/compound",
+    matcher: (path) => path.startsWith("/compound"),
+  },
+];
+
+function TopBar() {
   const clock = useIstClock();
+  const location = useLocation();
   const [ok, setOk] = useState<boolean | null>(null);
   const [ticker, setTicker] = useState<CommodityPrice[]>([]);
 
@@ -135,27 +189,63 @@ function Header() {
   }, []);
 
   return (
-    <header className="h-12 shrink-0 flex items-center justify-between px-5 border-b border-op-border bg-op-panel">
-      <div className="flex items-center gap-3">
-        <span
-          className={clsx(
-            "inline-block h-1.5 w-1.5 rounded-full",
-            ok === null ? "bg-op-ink3" : ok ? "bg-op-good" : "bg-op-danger",
-          )}
-        />
-        <span className="font-mono text-micro uppercase tracking-wider text-op-ink2">
-          {ok === null ? "checking" : ok ? "operational" : "degraded"}
-        </span>
-        <span className="hidden sm:inline-block w-px h-3 bg-op-border" />
-        <span className="hidden sm:inline-block font-serif italic text-op-ink text-sm">
-          Resilience console
-        </span>
+    <header className="h-14 shrink-0 flex items-center justify-between px-6 border-b border-slate-200 bg-white z-20">
+      {/* Brand Logo and Horizontal Tabs */}
+      <div className="flex items-center gap-8 h-full">
+        {/* Brand Logo */}
+        <div className="flex items-center gap-2">
+          <span className="font-bold tracking-tight text-slate-800 text-sm">IMPORTRISK</span>
+          <span className="font-light text-slate-400 text-xs tracking-wider border-l border-slate-200 pl-2">
+            ANALYZE
+          </span>
+        </div>
+
+        {/* Tabs Navigation */}
+        <nav className="flex items-center gap-1 h-full pt-1">
+          {TOP_TABS.map((tab) => {
+            const isActive = tab.matcher(location.pathname);
+            return (
+              <NavLink
+                key={tab.label}
+                to={tab.to}
+                className={clsx(
+                  "px-4 h-13 flex items-center text-[13px] font-medium border-b-2 transition-all duration-150",
+                  isActive
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200"
+                )}
+              >
+                {tab.label}
+              </NavLink>
+            );
+          })}
+        </nav>
       </div>
-      <div className="flex items-center gap-3">
+
+      {/* Ticker, Status, Profile */}
+      <div className="flex items-center gap-4">
+        {/* Price Ticker */}
         <div className="hidden lg:block">
           <CommodityTicker items={ticker} />
         </div>
-        <span className="font-mono text-micro tabular-nums text-op-ink2">{clock}</span>
+
+        {/* IST Clock */}
+        <span className="hidden sm:inline-block font-mono text-micro tabular-nums text-slate-400">
+          {clock}
+        </span>
+
+        {/* Health status indicator */}
+        <div className="flex items-center gap-1.5 border-l border-slate-200 pl-4 py-1">
+          <span
+            className={clsx(
+              "inline-block h-1.5 w-1.5 rounded-full",
+              ok === null ? "bg-slate-300 animate-pulse" : ok ? "bg-emerald-500" : "bg-red-500"
+            )}
+          />
+          <span className="font-mono text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
+            {ok === null ? "Checking" : ok ? "Operational" : "Degraded"}
+          </span>
+        </div>
       </div>
     </header>
   );
@@ -169,38 +259,48 @@ function ChatLauncher() {
     <button
       type="button"
       onClick={toggleChat}
-      className="fixed bottom-6 right-6 z-30 flex h-10 items-center gap-2 rounded-full border border-op-accent bg-op-accentSoft px-4 text-sm text-op-accent hover:bg-op-accent/20 transition-colors duration-150"
-      aria-label="Open chat with the analyst"
+      className="fixed bottom-6 right-6 z-30 flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all duration-150 border border-blue-500"
+      aria-label="Open analyst chat"
     >
-      <span className="inline-block h-1.5 w-1.5 rounded-full bg-op-accent" aria-hidden="true" />
-      <span className="font-serif italic">Ask analyst</span>
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+      </svg>
     </button>
   );
 }
 
 export default function App() {
   return (
-    <div className="min-h-screen flex bg-op-bg text-op-ink">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header />
-        <main className="flex-1 overflow-auto p-6 bg-op-bg">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/twin" element={<DigitalTwin />} />
-            <Route path="/cascade" element={<ImpactCascade />} />
-            <Route path="/scenarios" element={<Scenarios />} />
-            <Route path="/scenarios/:name" element={<ScenarioRun />} />
-            <Route path="/compare" element={<ScenarioCompare />} />
-            <Route path="/compound" element={<CompoundScenarios />} />
-            <Route path="/stress-test" element={<StressTest />} />
-            <Route path="/backtest" element={<Backtest />} />
-            <Route path="/sourcing" element={<Sourcing />} />
-            <Route path="/spr" element={<SPR />} />
-            <Route path="/baselines" element={<Baselines />} />
-          </Routes>
-        </main>
+    <div className="h-screen flex flex-col bg-slate-900 overflow-hidden font-sans">
+      {/* Horizontal Topbar */}
+      <TopBar />
+      
+      {/* Sidebar + Main Content */}
+      <div className="flex-1 flex min-h-0">
+        <IconSidebar />
+        
+        {/* Navy page frame wrapper */}
+        <div className="flex-1 flex flex-col min-w-0 bg-[#0E1B30] overflow-hidden p-6">
+          <main className="flex-1 overflow-auto rounded-xl">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/twin" element={<DigitalTwin />} />
+              <Route path="/cascade" element={<ImpactCascade />} />
+              <Route path="/scenarios" element={<Scenarios />} />
+              <Route path="/scenarios/:name" element={<ScenarioRun />} />
+              <Route path="/compare" element={<ScenarioCompare />} />
+              <Route path="/compound" element={<CompoundScenarios />} />
+              <Route path="/stress-test" element={<StressTest />} />
+              <Route path="/backtest" element={<Backtest />} />
+              <Route path="/sourcing" element={<Sourcing />} />
+              <Route path="/spr" element={<SPR />} />
+              <Route path="/baselines" element={<Baselines />} />
+            </Routes>
+          </main>
+        </div>
       </div>
+      
+      {/* Ask analyst overlay drawer */}
       <ChatDrawer />
       <ChatLauncher />
     </div>
