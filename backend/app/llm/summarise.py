@@ -246,9 +246,9 @@ class LLMClient:
             max_tokens=_BRIEF_MAX_TOKENS,
         )
 
-    async def chat(self, question: str, context: dict[str, Any]) -> str:
+    async def chat(self, question: str, context: dict[str, Any], retrieved_knowledge: list[dict[str, str]] | None = None) -> str:
         """Conversational endpoint for the ask-the-analyst chat drawer."""
-        prompt = build_chat_prompt(question, context)
+        prompt = build_chat_prompt(question, context, retrieved_knowledge=retrieved_knowledge)
         return await self._complete(
             model=self._synthesis_model,
             user_prompt=prompt,
