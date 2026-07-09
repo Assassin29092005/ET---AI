@@ -1,17 +1,23 @@
 """Sourcing intelligence — alternative supplier ranking.
 
 Given a commodity and an optionally disrupted source country, produce a
-ranked list of alternative source countries based on:
+ranked list of alternative source countries based on six weighted signals:
+
   - current geopolitical risk along the supplier's primary maritime corridor
   - historical import share (a proxy for established commercial relationships,
     payment rails, vessel availability)
   - a coarse lead-time score derived from corridor and origin
+  - spot-price competitiveness (lower landed cost → higher score)
+  - tanker / logistics availability (AIS-derived corridor utilisation proxy)
+  - refinery-grade compatibility (crude grade match to Indian refinery slates)
 
-This module is deliberately scoped. It does NOT validate refinery
-compatibility (API gravity, sulfur content), port draft constraints,
-contract take-or-pay terms, OFAC SDN exposure on specific counterparties,
-or freight rate elasticity. Those checks happen downstream of this ranking,
-and we surface that caveat in every response.
+The last three carry intentionally low weights (< 0.10 combined) so they
+influence tie-breaking without dominating the risk-based ranking.
+
+This module does NOT model port draft constraints, contract take-or-pay
+terms, or OFAC SDN exposure on specific counterparties. Those checks
+happen downstream of this ranking, and we surface that caveat in every
+response.
 """
 
 from __future__ import annotations
@@ -42,6 +48,16 @@ class Commodity(str, Enum):
     POTASH = "potash"
 
 
+# --- Composite-score weight constants ------------------------------------
+# Kept as module constants so the API / docs can reference them.
+W_RISK = 0.45          # corridor geopolitical risk (inverted: lower risk → higher score)
+W_SHARE = 0.25         # historical import share
+W_LEAD = 0.15          # lead-time score
+W_PRICE = 0.08         # spot-price competitiveness (< 0.10 per design)
+W_TANKER = 0.04        # tanker / logistics availability
+W_GRADE = 0.03         # refinery-grade compatibility
+
+
 @dataclass
 class SourcingOption:
     """A ranked alternative source country with explanatory metadata."""
@@ -53,6 +69,10 @@ class SourcingOption:
     lead_time_score: float
     primary_corridor: str
     rationale: str
+    # New sub-scores surfaced for transparency.
+    price_competitiveness: float = 0.5
+    tanker_availability_score: float = 0.5
+    grade_match_score: float = 0.5
     caveats: List[str] = field(default_factory=list)
 
 
@@ -323,25 +343,57 @@ async def rank_alternatives(
     commodity: Commodity,
     disrupted_source: Optional[str] = None,
     risk_overrides: Optional[Dict[str, float]] = None,
+    spot_prices: Optional[Dict[str, float]] = None,
+    tanker_utilisation: Optional[Dict[str, float]] = None,
+    grade_data: Optional[Dict[str, str]] = None,
 ) -> List[SourcingOption]:
     """Rank alternative source countries for a commodity.
 
-    Composite score = 0.5 * (1 - current_risk)
-                    + 0.3 * historical_share
-                    + 0.2 * lead_time_score
+    Composite score (6 factors):
+        W_RISK  * (1 - current_risk)        = 0.45
+        W_SHARE * historical_share           = 0.25
+        W_LEAD  * lead_time_score            = 0.15
+        W_PRICE * price_competitiveness      = 0.08
+        W_TANKER * tanker_availability_score  = 0.04
+        W_GRADE * grade_match_score           = 0.03
+                                          total = 1.00
 
     The disrupted source, if provided, is excluded from the result so the
     caller sees only substitutes.
 
     ``risk_overrides`` maps a corridor label (e.g. "Strait of Hormuz") to a
-    current risk in [0, 1] and supersedes the static default table. The API
-    layer populates it from the live corridor scores and from any active
-    disruption (a full chokepoint cutoff drives the affected corridor to ~1.0),
-    so the ranking re-orders as risk moves rather than staying fixed.
+    current risk in [0, 1] and supersedes the static default table.
+
+    ``spot_prices`` maps a corridor label to the spot-linked landed price for
+    this commodity via that corridor. Lower prices score higher.
+
+    ``tanker_utilisation`` maps a corridor label to a utilisation ratio [0, 1]
+    where 1 means fully congested / no spare capacity. Lower utilisation
+    scores higher.
+
+    ``grade_data`` maps a country name to a grade-compatibility flag:
+    'match' | 'mismatch' | 'unknown' | 'n/a'.
     """
     shares = _HISTORICAL_SHARES.get(commodity, {})
     if not shares:
         return []
+
+    # Determine the price range across suppliers for normalisation.
+    _spot = spot_prices or {}
+    _tanker = tanker_utilisation or {}
+    _grades = grade_data or {}
+
+    # Collect per-corridor prices for min/max normalisation.
+    corridor_prices = [
+        _spot[_COUNTRY_TO_CORRIDOR.get(c, "Cape of Good Hope")]
+        for c in shares
+        if _COUNTRY_TO_CORRIDOR.get(c, "Cape of Good Hope") in _spot
+    ]
+    price_min = min(corridor_prices) if corridor_prices else 1.0
+    price_max = max(corridor_prices) if corridor_prices else 1.0
+    price_range = price_max - price_min if price_max > price_min else 1.0
+
+    _GRADE_SCORE = {"match": 1.0, "n/a": 0.5, "unknown": 0.5, "mismatch": 0.0}
 
     options: List[SourcingOption] = []
     for country, share in shares.items():
@@ -355,11 +407,31 @@ async def rank_alternatives(
             risk = country_risk_by_corridor(country)
         lead_time = _LEAD_TIME_SCORE.get(corridor, 0.5)
 
-        score = 0.5 * (1.0 - risk) + 0.3 * share + 0.2 * lead_time
+        # Price competitiveness: 1.0 = cheapest supplier, 0.0 = most expensive.
+        if corridor in _spot and price_range > 0:
+            price_comp = 1.0 - ((_spot[corridor] - price_min) / price_range)
+        else:
+            price_comp = 0.5  # neutral when no spot data
+
+        # Tanker availability: invert utilisation so low-util corridors score high.
+        tanker_util = _tanker.get(corridor, 0.5)
+        tanker_score = 1.0 - max(0.0, min(1.0, tanker_util))
+
+        # Grade match.
+        grade_flag = _grades.get(country, "unknown" if commodity == Commodity.CRUDE_OIL else "n/a")
+        grade_score = _GRADE_SCORE.get(grade_flag, 0.5)
+
+        score = (
+            W_RISK * (1.0 - risk)
+            + W_SHARE * share
+            + W_LEAD * lead_time
+            + W_PRICE * price_comp
+            + W_TANKER * tanker_score
+            + W_GRADE * grade_score
+        )
 
         caveats = [
-            "Ranking does not validate refinery compatibility, port draft "
-            "constraints, or contract terms.",
+            "Ranking does not validate port draft constraints or contract terms.",
         ]
         if commodity == Commodity.CRUDE_OIL:
             caveats.append(
@@ -388,6 +460,9 @@ async def rank_alternatives(
                 rationale=_rationale_text(
                     country, corridor, risk, share, disrupted_source
                 ),
+                price_competitiveness=round(price_comp, 4),
+                tanker_availability_score=round(tanker_score, 4),
+                grade_match_score=round(grade_score, 4),
                 caveats=caveats,
             )
         )

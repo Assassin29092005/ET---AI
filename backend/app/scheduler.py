@@ -120,6 +120,16 @@ async def _refresh_once() -> None:
             except Exception:  # pragma: no cover  — fanout never raises into the loop
                 pass
 
+    # Evaluate the agentic orchestrator — triggers autonomous chains when
+    # corridor risk crosses the configured threshold.
+    try:
+        from app.engines.orchestrator import evaluate as agent_evaluate
+        triggered = await agent_evaluate(fresh)
+        if triggered:
+            log.info("scheduler.agent_triggered", corridors=triggered)
+    except Exception as exc:
+        log.warning("scheduler.agent_eval_failed", error=str(exc))
+
 
 async def _loop() -> None:
     assert _stop_event is not None
