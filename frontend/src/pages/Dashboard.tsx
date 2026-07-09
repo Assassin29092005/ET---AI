@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import {
   getExecutiveBrief,
   getFeed,
+  getPipelineTiming,
+  getAgentActions,
   getScenarios,
   getScores,
   getTwinStateWithAlerts,
@@ -12,6 +14,8 @@ import {
   type ScenarioMeta,
   type SupplierScore,
   type TwinStateWithAlerts,
+  type PipelineTiming,
+  type AgentAction,
 } from "@/lib/api";
 import { connectFeedWebSocket } from "@/lib/ws";
 import { fmtIstTime } from "@/lib/fmt";
@@ -89,6 +93,16 @@ function ExecutiveBriefPanel({ brief, onShare, shareStatus }: { brief: Executive
           <span className="font-mono text-xs text-slate-400">
             {fmtTimeUtc(brief.generatedAt)}
           </span>
+          <a
+            href="/api/export/brief.html"
+            download
+            className="btn-ghost text-xs inline-flex items-center gap-1 border border-slate-200 bg-white hover:bg-slate-50 px-2 py-1 rounded transition-colors text-slate-600 font-semibold"
+          >
+            <svg className="w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export Brief
+          </a>
           <button type="button" className="btn-ghost text-xs" onClick={onShare} disabled={shareStatus === "Sending..."}>
             {shareStatus || "Send to Slack"}
           </button>
@@ -166,6 +180,8 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [timing, setTiming] = useState<PipelineTiming | null>(null);
+  const [agentActions, setAgentActions] = useState<AgentAction[]>([]);
   const pushFeedItem = useAppStore((s) => s.pushFeedItem);
 
   // Selector state matching reference UI
@@ -210,6 +226,24 @@ export default function Dashboard() {
       cancelled = true;
       clearInterval(interval);
     };
+  }, []);
+
+  // Fetch pipeline timing on mount and after each dashboard refresh
+  useEffect(() => {
+    getPipelineTiming().then(setTiming).catch(() => {});
+    const tmr = setInterval(() => {
+      getPipelineTiming().then(setTiming).catch(() => {});
+    }, REFRESH_MS);
+    return () => clearInterval(tmr);
+  }, []);
+
+  // Fetch agent actions
+  useEffect(() => {
+    getAgentActions(5).then((r) => setAgentActions(r.actions || [])).catch(() => {});
+    const tmr2 = setInterval(() => {
+      getAgentActions(5).then((r) => setAgentActions(r.actions || [])).catch(() => {});
+    }, REFRESH_MS);
+    return () => clearInterval(tmr2);
   }, []);
 
   // Sync suppliers & sourcing when category changes
@@ -361,6 +395,30 @@ export default function Dashboard() {
           {error && <div className="mt-1 text-red-400 normal-case">{error}</div>}
         </div>
       </header>
+
+      {/* Pipeline Timing Strip */}
+      {timing && timing.lastE2eMs > 0 && (
+        <div className="flex items-center gap-4 rounded-lg border border-slate-700/50 bg-slate-800/60 px-4 py-2 text-[11px] font-mono text-slate-400">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-semibold text-slate-300">Signal → Recommendation</span>
+          </span>
+          <span className="border-l border-slate-700 pl-4">
+            Scoring: <span className="font-bold text-white">{timing.scoresMs.toFixed(0)}ms</span>
+          </span>
+          <span className="border-l border-slate-700 pl-4">
+            Sourcing: <span className="font-bold text-white">{timing.sourcingMs.toFixed(0)}ms</span>
+          </span>
+          {timing.scenarioMs > 0 && (
+            <span className="border-l border-slate-700 pl-4">
+              Scenario: <span className="font-bold text-white">{timing.scenarioMs.toFixed(0)}ms</span>
+            </span>
+          )}
+          <span className="ml-auto text-emerald-400 font-bold">
+            E2E: {timing.lastE2eMs.toFixed(0)}ms
+          </span>
+        </div>
+      )}
 
       {/* Sanctions Banner */}
       {twinState?.sanctionAlerts && twinState.sanctionAlerts.length > 0 && (
@@ -670,6 +728,46 @@ export default function Dashboard() {
       <section>
         <ExecutiveBriefPanel brief={brief} onShare={shareToSlack} shareStatus={shareStatus} />
       </section>
+
+      {/* Grid: 6. Agent Activity */}
+      {agentActions.length > 0 && (
+        <section className="card overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 bg-slate-50">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Autonomous Agent Activity</div>
+              <h3 className="mt-0.5 text-sm font-bold text-slate-800">Signal → Recommendation Pipeline</h3>
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Agentic
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {agentActions.slice(0, 5).map((a, i) => (
+              <div key={`${a.chainId}-${a.actionType}-${i}`} className="flex items-start gap-4 px-5 py-3">
+                <div className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${
+                  a.actionType === 'trigger_detected' ? 'bg-red-500' :
+                  a.actionType === 'chain_complete' ? 'bg-emerald-500' :
+                  a.actionType.includes('failed') ? 'bg-amber-500' :
+                  'bg-blue-500'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-slate-700">
+                    {a.details?.message || a.actionType}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                    <span className="uppercase font-bold">{a.corridor}</span>
+                    <span>•</span>
+                    <span>{a.actionType.replace(/_/g, ' ')}</span>
+                    <span>•</span>
+                    <span>{fmtTimeUtc(a.timestamp)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

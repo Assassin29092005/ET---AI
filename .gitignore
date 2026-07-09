@@ -58,3 +58,6 @@ recorded_demo/
 *.mp4
 *.mov
 !docs/**/*.mp4
+
+
+MD_FILES/
