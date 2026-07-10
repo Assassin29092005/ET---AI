@@ -78,6 +78,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         log.warning("startup.baselines_failed", error=str(exc))
 
+    # Build the RAG knowledge index from documentation and fixture files.
+    # This populates the in-memory vector store that the /api/chat endpoint
+    # uses for Retrieval-Augmented Generation.
+    try:
+        from app.llm.rag import build_index
+        chunk_count = build_index()
+        log.info("startup.rag_index_built", chunks=chunk_count)
+    except Exception as exc:
+        log.warning("startup.rag_index_failed", error=str(exc))
+
     # Start the continuous risk-score refresh loop. This is the "live, not
     # weekly" half of the Geopolitical Risk Intelligence Agent — see scheduler.py.
     # Awaits one initial refresh inline so the snapshot is ready immediately.

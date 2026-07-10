@@ -241,7 +241,7 @@ def build_executive_brief_prompt(snapshot: dict[str, Any]) -> str:
     )
 
 
-def build_chat_prompt(question: str, context: dict[str, Any]) -> str:
+def build_chat_prompt(question: str, context: dict[str, Any], retrieved_knowledge: list[dict[str, str]] | None = None) -> str:
     """Prompt for an interactive chat answer grounded in supplied context.
 
     Inputs:
@@ -262,25 +262,52 @@ def build_chat_prompt(question: str, context: dict[str, Any]) -> str:
                   commodities_basket: the six-commodity slice currently
                                      tracked on screen, as a list of
                                      commodity codes or labels.
+      retrieved_knowledge: optional list of RAG-retrieved chunks, each with
+                           keys: text, source, section, score.
 
-    The model is constrained to answer ONLY from the supplied context. When
-    the context is insufficient it must say so explicitly with the exact
-    phrase 'Not enough data to answer confidently'.
+    The model is constrained to answer from the supplied live context AND
+    the retrieved reference knowledge. When neither source contains enough
+    information it must say so explicitly with the exact phrase
+    'Not enough data to answer confidently'.
     """
     current_scores = context.get("current_scores") or []
     recent_events = context.get("recent_events") or []
     top_scenarios = context.get("top_scenarios") or []
     commodities_basket = context.get("commodities_basket") or []
 
+    # Build the retrieved knowledge section
+    rag_section = ""
+    if retrieved_knowledge:
+        rag_entries = []
+        for chunk in retrieved_knowledge:
+            source = chunk.get("source", "unknown")
+            section = chunk.get("section", "")
+            text = chunk.get("text", "")
+            rag_entries.append(f"[{source} > {section}]\n{text}")
+        rag_section = (
+            "\n--- RETRIEVED REFERENCE KNOWLEDGE ---\n"
+            "The following excerpts were retrieved from internal project "
+            "documentation, assumption ledgers, and fixture databases. Use "
+            "them to answer methodology, parameter, and configuration "
+            "questions accurately.\n\n"
+            + "\n\n".join(rag_entries)
+            + "\n\n"
+        )
+
     return (
         f"{SYSTEM_ANALYST}\n\n"
         "You are answering an interactive question from a procurement or "
         "policy user looking at the live India energy supply chain "
-        "dashboard. Use ONLY the data in the CONTEXT block below. Do not "
-        "invent figures, suppliers, corridors, scenarios, or events that "
-        "are not present in the context. Do not draw on general knowledge "
-        "beyond labelling and definitions.\n\n"
-        "CONTEXT:\n"
+        "dashboard. You have TWO sources of ground truth:\n\n"
+        "1. LIVE OPERATIONAL STATE — real-time scores, events, scenarios, "
+        "and market data currently in the system.\n"
+        "2. REFERENCE KNOWLEDGE — retrieved excerpts from internal "
+        "documentation, assumptions, and databases.\n\n"
+        "Use BOTH sources when relevant. Do not invent figures, suppliers, "
+        "corridors, scenarios, or events that are not present in either "
+        "source. Do not draw on general knowledge beyond labelling and "
+        "definitions.\n\n"
+        "--- LIVE OPERATIONAL STATE ---\n"
         "current_scores:\n"
         f"{_compact_json(current_scores)}\n"
         "recent_events:\n"
@@ -288,8 +315,9 @@ def build_chat_prompt(question: str, context: dict[str, Any]) -> str:
         "top_scenarios:\n"
         f"{_compact_json(top_scenarios)}\n"
         "commodities_basket:\n"
-        f"{_compact_json(commodities_basket)}\n\n"
-        "QUESTION:\n"
+        f"{_compact_json(commodities_basket)}\n"
+        f"{rag_section}"
+        "--- USER QUESTION ---\n"
         f"{question}\n\n"
         "Answer rules:\n"
         "- For greetings, pleasantries, or questions under 6 words that "
@@ -297,10 +325,13 @@ def build_chat_prompt(question: str, context: dict[str, Any]) -> str:
         "do', 'help'): reply in ONE short friendly sentence inviting the "
         "user to ask about a specific corridor, commodity, scenario, or "
         "sourcing decision. Do NOT produce a situation report.\n"
-        "- For genuine questions: cite specific figures from "
-        "current_scores. When you reference a corridor, include its "
+        "- For genuine questions about live state: cite specific figures "
+        "from current_scores. When you reference a corridor, include its "
         "composite score and tier. When you reference a commodity, name "
         "it as it appears in commodities_basket.\n"
+        "- For questions about methodology, parameters, assumptions, or "
+        "system configuration: cite the relevant excerpt from REFERENCE "
+        "KNOWLEDGE, including the source file and section.\n"
         "- When you cite an event, include its id or headline from "
         "recent_events. When you cite a scenario, include its "
         "scenarioId from top_scenarios.\n"
@@ -308,10 +339,11 @@ def build_chat_prompt(question: str, context: dict[str, Any]) -> str:
         "general situation report unless the question asks for one.\n"
         "- Plain text only. No markdown headers, no bullets, no bold "
         "markers. Short paragraphs.\n"
-        "- If the context does not contain enough information to answer "
-        "the question accurately, respond with exactly the sentence: "
-        "Not enough data to answer confidently. You may then add one "
-        "short sentence naming which specific signal would be needed."
+        "- If neither the live state nor the reference knowledge contains "
+        "enough information to answer the question accurately, respond "
+        "with exactly the sentence: Not enough data to answer "
+        "confidently. You may then add one short sentence naming which "
+        "specific signal would be needed."
     )
 
 

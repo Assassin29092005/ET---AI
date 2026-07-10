@@ -324,7 +324,7 @@ export function getCommodities(): Promise<CommodityPrice[]> {
   return request<CommodityPrice[]>({ method: 'GET', url: '/commodities' });
 }
 
-export interface CostOfInaction {
+export interface CostOfInactionResult {
   scenarioId: string;
   durationDays: number;
   intensity: number;
@@ -337,15 +337,18 @@ export interface CostOfInaction {
     refinerySpotPremium: number;
     fxPassthrough: number;
   };
+  assumptions: { indiaGdpCrore: number; dailyGdpCrore: number; method: string };
   asOf: string;
 }
+
+export type CostOfInaction = CostOfInactionResult;
 
 export function getCostOfInaction(
   scenario: string,
   durationDays = 14,
   intensity = 0.5,
-): Promise<CostOfInaction> {
-  return request<CostOfInaction>({
+): Promise<CostOfInactionResult> {
+  return request<CostOfInactionResult>({
     method: 'GET',
     url: '/cost-of-inaction',
     params: { scenario, durationDays, intensity },
@@ -744,4 +747,27 @@ export function getLatestSnapshot(): Promise<{
   return request({ method: 'GET', url: '/scores/latest-snapshot' });
 }
 
+export interface PipelineTiming {
+  scoresMs: number;
+  sourcingMs: number;
+  scenarioMs: number;
+  lastE2eMs: number;
+  updatedAt: string;
+}
+
+export function getPipelineTiming(): Promise<PipelineTiming> {
+  return request<PipelineTiming>({ method: 'GET', url: '/pipeline-timing' });
+}
+
+export interface AgentAction {
+  chainId: string;
+  corridor: string;
+  actionType: string;
+  details: { message?: string; [key: string]: unknown };
+  timestamp: string;
+}
+
+export function getAgentActions(limit = 20): Promise<{ actions: AgentAction[]; count: number; asOf: string }> {
+  return request({ method: 'GET', url: '/agent/actions', params: { limit } });
+}
 export default client;
