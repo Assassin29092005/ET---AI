@@ -105,28 +105,72 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
 ];
 
 function IconSidebar() {
+  const [isExpanded, setIsExpanded] = useState<boolean>(() => window.innerWidth >= 1200);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsExpanded(window.innerWidth >= 1200);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   return (
-    <aside className="w-16 shrink-0 border-r border-slate-200 bg-white flex flex-col items-center py-4 gap-4">
-      {SIDEBAR_ITEMS.map((item) => (
-        <NavLink
-          key={item.label}
-          to={item.to}
-          className={({ isActive }) =>
-            clsx(
-              "relative flex items-center justify-center w-12 h-12 rounded-xl transition-all duration-150 group",
-              isActive
-                ? "bg-blue-50 text-blue-600 font-semibold"
-                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50",
-            )
-          }
-          title={item.label}
+    <aside
+      className={clsx(
+        "shrink-0 border-r border-slate-200 bg-white flex flex-col py-4 gap-2 transition-all duration-200",
+        isExpanded ? "w-48 px-3" : "w-16 px-2.5 items-center"
+      )}
+    >
+      {/* Navigation Links */}
+      <div className="flex-1 flex flex-col gap-2.5 w-full">
+        {SIDEBAR_ITEMS.map((item) => (
+          <NavLink
+            key={item.label}
+            to={item.to}
+            className={({ isActive }) =>
+              clsx(
+                "relative flex items-center rounded-xl transition-all duration-150 group h-11 shrink-0",
+                isExpanded ? "justify-start px-3.5 gap-3 w-full" : "justify-center w-11",
+                isActive
+                  ? "bg-blue-50 text-blue-600 font-semibold"
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+              )
+            }
+            title={isExpanded ? undefined : item.label}
+          >
+            <div className="shrink-0">{item.icon}</div>
+            {isExpanded && (
+              <span className="text-xs font-semibold text-slate-700 group-hover:text-slate-900 transition-colors whitespace-nowrap">
+                {item.label}
+              </span>
+            )}
+            {!isExpanded && (
+              <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
+                {item.label}
+              </span>
+            )}
+          </NavLink>
+        ))}
+      </div>
+
+      {/* Sidebar Toggle Button (at bottom) */}
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all duration-150 mt-auto shrink-0 self-center"
+        title={isExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
+      >
+        <svg
+          className={clsx("w-5 h-5 transition-transform duration-200", isExpanded && "rotate-180")}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
         >
-          {item.icon}
-          <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
-            {item.label}
-          </span>
-        </NavLink>
-      ))}
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+        </svg>
+      </button>
     </aside>
   );
 }
