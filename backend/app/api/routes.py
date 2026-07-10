@@ -3103,7 +3103,38 @@ async def export_sourcing_csv(commodity: str) -> Response:
         raise HTTPException(status_code=400, detail=f"Unknown commodity: {commodity}") from exc
 
     overrides = await _live_risk_overrides(None, 1.0)
-    options = await sourcing_engine.rank_alternatives(sourcing_commodity, risk_overrides=overrides)
+
+    # Build the three signal dicts for the 6-factor composite to match the UI ranking
+    spot_price_base, price_unit, is_spot = _spot_price(commodity)
+    spot_prices_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        risk_frac = overrides.get(eng_label, 0.3)
+        congestion_h = float(TWIN_AVG_DELAY_HOURS.get(sc_key, 0))
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        t_util = max(0.0, min(1.0, vessels / capacity))
+        risk_prem = max(0.0, (risk_frac - 0.30))
+        freight_prem = 0.06 * t_util + (congestion_h / 24.0) * 0.005
+        spot_prices_dict[eng_label] = round(spot_price_base * (1.0 + risk_prem + freight_prem), 2)
+
+    tanker_util_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        tanker_util_dict[eng_label] = max(0.0, min(1.0, vessels / capacity))
+
+    grade_data_dict: dict[str, str] = {}
+    for c_name in _COUNTRY_CRUDE_GRADE:
+        flag, _ = _grade_compat(c_name, commodity)
+        grade_data_dict[c_name] = flag
+
+    options = await sourcing_engine.rank_alternatives(
+        sourcing_commodity,
+        risk_overrides=overrides,
+        spot_prices=spot_prices_dict,
+        tanker_utilisation=tanker_util_dict,
+        grade_data=grade_data_dict,
+    )
 
     buf = io.StringIO()
     writer = csv.writer(buf)
