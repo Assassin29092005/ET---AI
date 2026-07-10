@@ -188,7 +188,7 @@ export default function Sourcing() {
     return `Top open source: ${top.country} (${top.importSharePct.toFixed(0)}% of current imports). ${cleared} of ${openOptions.length} open options pass sanctions check. Composite risk ${top.routeRiskScore.toFixed(0)} via ${top.routeCorridor}.`;
   }, [options]);
 
-  const computeTimeMs = options.length > 0 ? (options[0] as Record<string, unknown>).computeTimeMs as number | undefined : undefined;
+  const computeTimeMs = options.length > 0 ? (options[0] as unknown as Record<string, unknown>).computeTimeMs as number | undefined : undefined;
 
   return (
     <div className="flex flex-col gap-6">
