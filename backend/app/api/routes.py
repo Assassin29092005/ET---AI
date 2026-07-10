@@ -1345,14 +1345,27 @@ async def twin_state() -> dict:
             })
     vessel_count = len(vessel_positions) if ais_source == "live" else (fixture_count or 60)
 
-    corridor_status = {
-        "hormuz": "congested",
-        "bab_el_mandeb": "disrupted",
-        "malacca": "open",
-        "south_china_sea": "congested",
-        "cape_of_good_hope": "open",
-        "suez": "congested",
-    }
+    # Compute live corridor statuses based on risk scores to avoid hardcoding
+    live_scores_list = await get_scores(commodity=None)
+    max_scores: dict[str, float] = {}
+    for s in live_scores_list:
+        c_code = s.get("corridor")
+        val = float(s.get("score") or 0.0)
+        if c_code:
+            max_scores[c_code] = max(max_scores.get(c_code, 0.0), val)
+
+    corridor_status: dict[str, str] = {}
+    for c_code in ["hormuz", "bab_el_mandeb", "malacca", "south_china_sea", "cape_of_good_hope", "suez"]:
+        score = max_scores.get(c_code, 0.0)
+        if score >= 80.0:
+            status = "closed"
+        elif score >= 70.0:
+            status = "disrupted"
+        elif score >= 40.0:
+            status = "congested"
+        else:
+            status = "open"
+        corridor_status[c_code] = status
     throughput = {
         "hormuz": 19.5,
         "bab_el_mandeb": 9.2,
