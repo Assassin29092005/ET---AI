@@ -255,7 +255,7 @@ export default function SPR() {
       {plan && (
         <>
           {/* AI decision brief section */}
-          <section className="rounded-xl border border-indigo-200 bg-indigo-50/40 shadow-sm overflow-hidden">
+          <section className="card border-indigo-200 overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 bg-slate-100/50">
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wider text-indigo-800 font-bold">
