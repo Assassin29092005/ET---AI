@@ -428,18 +428,18 @@ export default function Dashboard() {
             <span className="font-semibold text-slate-300">Signal → Recommendation</span>
           </span>
           <span className="border-l border-slate-700 pl-4">
-            Scoring: <span className="font-bold text-white">{timing.scoresMs.toFixed(0)}ms</span>
+            Scoring: <span className="font-bold text-white">{timing.scoresMs.toFixed(1)}ms</span>
           </span>
           <span className="border-l border-slate-700 pl-4">
-            Sourcing: <span className="font-bold text-white">{timing.sourcingMs.toFixed(0)}ms</span>
+            Sourcing: <span className="font-bold text-white">{timing.sourcingMs.toFixed(1)}ms</span>
           </span>
           {timing.scenarioMs > 0 && (
             <span className="border-l border-slate-700 pl-4">
-              Scenario: <span className="font-bold text-white">{timing.scenarioMs.toFixed(0)}ms</span>
+              Scenario: <span className="font-bold text-white">{timing.scenarioMs.toFixed(1)}ms</span>
             </span>
           )}
           <span className="ml-auto text-emerald-400 font-bold">
-            E2E: {timing.lastE2eMs.toFixed(0)}ms
+            E2E: {timing.lastE2eMs.toFixed(1)}ms
           </span>
         </div>
       )}
