@@ -101,7 +101,7 @@ function Column({
 
 export default function ImpactCascade() {
   const [causes, setCauses] = useState<CascadeCause[]>([]);
-  const [causeId, setCauseId] = useState<string>('corridor:hormuz');
+  const [causeId, setCauseId] = useState<string>('');
   const [intensity, setIntensity] = useState<number>(1.0);
   const [result, setResult] = useState<ImpactCascadeResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,13 +111,12 @@ export default function ImpactCascade() {
     getCascadeCauses()
       .then((data) => {
         setCauses(data);
-        if (data.length && !data.find((c) => c.id === causeId)) setCauseId(data[0].id);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load causes'));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function trace() {
+    if (!causeId) return;
     setLoading(true);
     setError(null);
     try {
@@ -130,11 +129,11 @@ export default function ImpactCascade() {
     }
   }
 
-  // Auto-run on first mount once causes are available
+  // Auto-run on first mount once causes are available and causeId is selected
   useEffect(() => {
-    if (causes.length && !result) trace();
+    if (causeId && causes.length && !result) trace();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [causes.length]);
+  }, [causes.length, causeId]);
 
   const groupedCauses = useMemo(() => {
     const groups: Record<string, CascadeCause[]> = {};
@@ -168,6 +167,7 @@ export default function ImpactCascade() {
             onChange={(e) => setCauseId(e.target.value)}
             className="min-w-[280px] input-op font-medium"
           >
+            <option value="" disabled>Select a cause...</option>
             {Object.entries(groupedCauses).map(([type, list]) => (
               <optgroup key={type} label={CAUSE_TYPE_LABEL[type] ?? type}>
                 {list.map((c) => (
@@ -196,7 +196,7 @@ export default function ImpactCascade() {
         <button
           type="button"
           onClick={trace}
-          disabled={loading}
+          disabled={loading || !causeId}
           className="btn-accent px-5 py-2 text-xs font-semibold bg-blue-600 border-blue-600 text-white hover:bg-blue-700 hover:border-blue-700 disabled:opacity-50 h-[38px] flex items-center justify-center min-w-[120px]"
         >
           {loading ? 'Tracing...' : 'Trace Cascade'}
@@ -219,6 +219,12 @@ export default function ImpactCascade() {
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-medium">{error}</div>
+      )}
+
+      {!causeId && (
+        <div className="card p-8 text-center text-slate-450 border border-slate-200 bg-white">
+          <p className="text-sm font-medium text-slate-500">Select a cause from the dropdown and click "Trace Cascade" to trace cascading downstream impacts.</p>
+        </div>
       )}
 
       {result && (

@@ -1345,14 +1345,27 @@ async def twin_state() -> dict:
             })
     vessel_count = len(vessel_positions) if ais_source == "live" else (fixture_count or 60)
 
-    corridor_status = {
-        "hormuz": "congested",
-        "bab_el_mandeb": "disrupted",
-        "malacca": "open",
-        "south_china_sea": "congested",
-        "cape_of_good_hope": "open",
-        "suez": "congested",
-    }
+    # Compute live corridor statuses based on risk scores to avoid hardcoding
+    live_scores_list = await get_scores(commodity=None)
+    max_scores: dict[str, float] = {}
+    for s in live_scores_list:
+        c_code = s.get("corridor")
+        val = float(s.get("score") or 0.0)
+        if c_code:
+            max_scores[c_code] = max(max_scores.get(c_code, 0.0), val)
+
+    corridor_status: dict[str, str] = {}
+    for c_code in ["hormuz", "bab_el_mandeb", "malacca", "south_china_sea", "cape_of_good_hope", "suez"]:
+        score = max_scores.get(c_code, 0.0)
+        if score >= 80.0:
+            status = "closed"
+        elif score >= 70.0:
+            status = "disrupted"
+        elif score >= 40.0:
+            status = "congested"
+        else:
+            status = "open"
+        corridor_status[c_code] = status
     throughput = {
         "hormuz": 19.5,
         "bab_el_mandeb": 9.2,
@@ -1813,7 +1826,7 @@ async def sourcing(
         # Freight premium is capped so it doesn't dominate the score.
         risk_premium = (risk - 30) / 100.0
         freight_premium = 0.06 * tanker_util + (congestion_hours / 24.0) * 0.005
-        landed_price = round(spot_price * (1.0 + risk_premium + freight_premium), 2)
+        landed_price = round(spot_price_base * (1.0 + risk_premium + freight_premium), 2)
 
         grade_flag, grade_note = _grade_compat(country, commodity)
 
@@ -2084,7 +2097,7 @@ async def sourcing_cascade_analyse(
         "narrative": narrative,
         "rankedOptions": options_payload,
         "riskSnapshot": risk_snapshot,
-        "model": "gemini-2.5-flash" if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
+        "model": get_settings().gemini_model if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
         "generatedAt": _now_iso(),
     }
 
@@ -2142,7 +2155,7 @@ async def impact_cascade(body: dict | None = None) -> dict:
         **payload,
         "intensity": round(intensity, 2),
         "narrative": narrative,
-        "model": "gemini-2.5-flash"
+        "model": settings.gemini_model
         if (settings.gemini_api_key and settings.allow_live_ingest)
         else "fixture",
         "generatedAt": _now_iso(),

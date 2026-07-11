@@ -421,11 +421,7 @@ export default function DigitalTwin() {
                 onChange={() => setLayers((prev) => ({ ...prev, sources: !prev.sources }))}
                 label="Foreign Sources"
               />
-              <ToggleSwitch
-                checked={layers.vedasOverlay}
-                onChange={() => setLayers((prev) => ({ ...prev, vedasOverlay: !prev.vedasOverlay }))}
-                label="VEDAS Overlay (ISRO)"
-              />
+              
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <button
@@ -462,7 +458,7 @@ export default function DigitalTwin() {
                   onChange={(e) => setSelectedWhatIfCorridor(e.target.value as Corridor | '')}
                   className="input-op w-full font-medium"
                 >
-                  <option value="">Suez Canal Blockage</option>
+                  <option value="">Select</option>
                   {corridors.map((c) => (
                     <option key={c.corridor} value={c.corridor}>
                       Close {CORRIDOR_LABEL[c.corridor] ?? c.corridor}
