@@ -11,7 +11,7 @@ Design decisions:
     while still being genuine RAG: there is a retrieval step, a ranking
     step, and the retrieved text is injected into the generative prompt.
   * When a Gemini API key is available *and* google-generativeai ≥ 0.8
-    is installed, embeds with ``text-embedding-004`` for much better
+    is installed, embeds with ``gemini-embedding-001`` for much better
     semantic matching.  Falls back to the TF-IDF path transparently.
   * Thread-safe: the index is built once at startup; retrieval is a
     pure numpy dot-product — no locks needed.
@@ -273,7 +273,7 @@ def build_index() -> int:
 
 
 def _try_gemini_embeddings(texts: list[str]) -> None:
-    """Attempt to embed all chunks using Gemini text-embedding-004."""
+    """Attempt to embed all chunks using Gemini gemini-embedding-001."""
     global _gemini_embeddings
 
     from app.config import get_settings
@@ -293,7 +293,7 @@ def _try_gemini_embeddings(texts: list[str]) -> None:
         # Truncate long chunks to stay within token limits
         batch = [t[:2000] for t in batch]
         result = genai.embed_content(
-            model="models/text-embedding-004",
+            model="models/gemini-embedding-001",
             content=batch,
             task_type="retrieval_document",
         )
@@ -375,7 +375,7 @@ def _retrieve_gemini(query: str) -> np.ndarray:
     genai.configure(api_key=settings.gemini_api_key)
 
     result = genai.embed_content(
-        model="models/text-embedding-004",
+        model="models/gemini-embedding-001",
         content=query[:2000],
         task_type="retrieval_query",
     )

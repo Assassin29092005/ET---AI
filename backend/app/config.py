@@ -43,9 +43,16 @@ class Settings(BaseSettings):
 
     allow_live_ingest: bool = Field(default=False)
 
+    # LLM (Gemini) live calls are gated separately from data ingestion so the
+    # analyst chat and narratives can be live off a GEMINI_API_KEY alone, while
+    # signals still run from fixtures. Live whenever a key is present; set this
+    # false to force canned replies even when a key is configured.
+    allow_live_llm: bool = Field(default=True)
+
     gemini_api_key: str | None = Field(default=None)
-    gemini_model: str = Field(default="gemini-2.5-flash")
-    gemini_model_fast: str = Field(default="gemini-2.5-flash-lite-preview-06-17")
+    # Auto-updating aliases so a retired point-version never 404s the demo.
+    gemini_model: str = Field(default="gemini-flash-latest")
+    gemini_model_fast: str = Field(default="gemini-flash-lite-latest")
 
     slack_webhook_url: str | None = Field(default=None)
 
