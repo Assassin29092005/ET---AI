@@ -2097,7 +2097,7 @@ async def sourcing_cascade_analyse(
         "narrative": narrative,
         "rankedOptions": options_payload,
         "riskSnapshot": risk_snapshot,
-        "model": "gemini-2.5-flash" if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
+        "model": get_settings().gemini_model if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
         "generatedAt": _now_iso(),
     }
 
@@ -2155,7 +2155,7 @@ async def impact_cascade(body: dict | None = None) -> dict:
         **payload,
         "intensity": round(intensity, 2),
         "narrative": narrative,
-        "model": "gemini-2.5-flash"
+        "model": settings.gemini_model
         if (settings.gemini_api_key and settings.allow_live_ingest)
         else "fixture",
         "generatedAt": _now_iso(),

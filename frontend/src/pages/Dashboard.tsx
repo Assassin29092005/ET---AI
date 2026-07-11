@@ -60,6 +60,20 @@ const COMMODITIES: Commodity[] = [
   "uranium",
 ];
 
+// Fallback countries per commodity — used when the backend /scores/suppliers
+// endpoint is unavailable so the dropdown is never empty.
+const FALLBACK_COUNTRIES: Record<string, string[]> = {
+  crude_oil: ["Russia", "Iraq", "Saudi Arabia", "UAE", "United States", "Nigeria", "Kuwait", "Angola", "Brazil", "Mexico"],
+  lng: ["Qatar", "United States", "UAE", "Australia", "Russia", "Oman", "Nigeria", "Angola"],
+  coking_coal: ["Australia", "United States", "Russia", "Mozambique", "Canada", "Indonesia"],
+  lithium: ["Chile", "China", "Argentina", "Australia", "Brazil"],
+  cobalt: ["China", "Belgium", "Finland", "Norway", "Japan", "South Korea"],
+  nickel: ["Indonesia", "Philippines", "Russia", "Australia", "Japan", "South Korea"],
+  rare_earths: ["China", "Malaysia", "Vietnam", "Japan", "United States"],
+  solar_pv: ["China", "Vietnam", "Malaysia", "Thailand", "South Korea", "Taiwan"],
+  uranium: ["Kazakhstan", "Russia", "France", "Canada", "Uzbekistan"],
+};
+
 const TIER_TEXT_COLOR: Record<RiskTier, string> = {
   low: "text-emerald-600",
   elevated: "text-amber-600",
@@ -250,29 +264,39 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     async function loadCategoryDetails() {
+      // Fetch suppliers — fall back to static country list on failure
+      let supplierList: SupplierScore[] = [];
       try {
-        const [supplierRes, sourcingRes] = await Promise.all([
-          getSupplierScores(selectedCommodity),
-          getSourcing(selectedCommodity, 100),
-        ]);
-        if (cancelled) return;
-        setSuppliers(supplierRes.suppliers || []);
-        setSourcingOptions(sourcingRes || []);
-        
-        // Auto-select first country if none is selected
-        if (supplierRes.suppliers && supplierRes.suppliers.length > 0) {
-          const firstCountry = supplierRes.suppliers[0].country;
-          setSelectedCountry(firstCountry);
-          
-          // Initial trigger match
-          if (!activeCountry) {
-            setActiveCountry(firstCountry);
-            setActiveCommodity(selectedCommodity);
-          }
+        const supplierRes = await getSupplierScores(selectedCommodity);
+        if (!cancelled) {
+          supplierList = supplierRes.suppliers || [];
         }
+      } catch {
+        // API unavailable — build minimal SupplierScore objects from fallback
+        const countries = FALLBACK_COUNTRIES[selectedCommodity] || [];
+        supplierList = countries.map((country) => ({
+          country,
+          sharePct: 0,
+          corridor: "hormuz" as const,
+          corridorScore: 0,
+          supplierRisk: 0,
+          tier: "low" as const,
+        }));
+      }
+
+      if (cancelled) return;
+      setSuppliers(supplierList);
+
+      // Fetch sourcing options separately so a failure doesn't block suppliers
+      try {
+        const sourcingRes = await getSourcing(selectedCommodity, 100);
+        if (!cancelled) setSourcingOptions(sourcingRes || []);
       } catch {
         // silent
       }
+
+      // Reset selected country to placeholder
+      setSelectedCountry("");
     }
     loadCategoryDetails();
     return () => {
@@ -457,6 +481,9 @@ export default function Dashboard() {
                     onChange={(e) => setSelectedCountry(e.target.value)}
                     className="input-op font-medium"
                   >
+                    <option value="" disabled>
+                      Select
+                    </option>
                     {suppliers.map((s) => (
                       <option key={s.country} value={s.country}>
                         {s.country}

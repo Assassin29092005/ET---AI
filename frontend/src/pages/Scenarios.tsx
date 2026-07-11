@@ -30,21 +30,36 @@ function MarketMetricRow({
   a,
   b,
   format,
+  lowerIsBetter = true,
   unit = '',
 }: {
   label: string;
   a: number;
   b: number;
   format: 'pct' | 'bps' | 'days' | 'usd';
+  lowerIsBetter?: boolean;
   unit?: string;
 }) {
   const maxVal = Math.max(Math.abs(a), Math.abs(b), 1);
   const wA = Math.min(100, Math.max(10, (Math.abs(a) / maxVal) * 100));
   const wB = Math.min(100, Math.max(10, (Math.abs(b) / maxVal) * 100));
+  const d = deltaInfo(a, b, lowerIsBetter);
 
   return (
-    <div className="grid grid-cols-[1fr,120px,100px,100px] items-center gap-3 border-b border-slate-100 py-3 px-1 hover:bg-slate-50/50 transition-colors">
+    <div className="grid grid-cols-[1fr,60px,100px,90px,90px] items-center gap-2 border-b border-slate-100 py-3 px-1 hover:bg-slate-50/50 transition-colors">
       <span className="text-xs font-semibold text-slate-500">{label}</span>
+      {/* Better / Worse badge */}
+      <div className="flex items-center justify-center">
+        {d.dir === 'better' && (
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 border border-emerald-200">Better</span>
+        )}
+        {d.dir === 'worse' && (
+          <span className="rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 border border-red-200">Worse</span>
+        )}
+        {d.dir === 'flat' && (
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500 border border-slate-200">Flat</span>
+        )}
+      </div>
       {/* Visual compare bars */}
       <div className="flex items-center gap-1 w-full justify-center">
         <div className="flex items-center justify-end w-12">
@@ -306,11 +321,11 @@ export default function Scenarios() {
             <div className="card overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Market Impact</h3>
-                <div className="flex gap-10 text-[9px] font-bold uppercase text-slate-400">
-                  <span className="w-12 text-center">Better</span>
-                  <span className="w-12 text-center">Compare</span>
-                  <span>A</span>
-                  <span>B</span>
+                <div className="flex text-[9px] font-bold uppercase text-slate-400" style={{ width: '340px' }}>
+                  <span className="w-[60px] text-center">Better</span>
+                  <span className="w-[100px] text-center">Compare</span>
+                  <span className="w-[90px] text-right">A</span>
+                  <span className="w-[90px] text-right">B</span>
                 </div>
               </div>
               <div className="p-3 bg-white flex flex-col gap-0.5">
@@ -353,10 +368,10 @@ export default function Scenarios() {
             <div className="card overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 bg-slate-50">
                 <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Macro Impact</h3>
-                <div className="flex gap-12 text-[9px] font-bold uppercase text-slate-400">
-                  <span>Delta</span>
-                  <span>A</span>
-                  <span>B</span>
+                <div className="flex text-[9px] font-bold uppercase text-slate-400" style={{ width: '320px' }}>
+                  <span className="w-[120px] text-center">Delta</span>
+                  <span className="w-[100px] text-right">A</span>
+                  <span className="w-[100px] text-right">B</span>
                 </div>
               </div>
               <div className="p-3 bg-white flex flex-col gap-0.5">
