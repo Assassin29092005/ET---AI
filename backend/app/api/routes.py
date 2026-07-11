@@ -1826,7 +1826,7 @@ async def sourcing(
         # Freight premium is capped so it doesn't dominate the score.
         risk_premium = (risk - 30) / 100.0
         freight_premium = 0.06 * tanker_util + (congestion_hours / 24.0) * 0.005
-        landed_price = round(spot_price * (1.0 + risk_premium + freight_premium), 2)
+        landed_price = round(spot_price_base * (1.0 + risk_premium + freight_premium), 2)
 
         grade_flag, grade_note = _grade_compat(country, commodity)
 
