@@ -2097,7 +2097,7 @@ async def sourcing_cascade_analyse(
         "narrative": narrative,
         "rankedOptions": options_payload,
         "riskSnapshot": risk_snapshot,
-        "model": get_settings().gemini_model if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
+        "model": get_settings().gemini_model if get_settings().gemini_api_key and get_settings().allow_live_llm else "fixture",
         "generatedAt": _now_iso(),
     }
 
@@ -2156,7 +2156,7 @@ async def impact_cascade(body: dict | None = None) -> dict:
         "intensity": round(intensity, 2),
         "narrative": narrative,
         "model": settings.gemini_model
-        if (settings.gemini_api_key and settings.allow_live_ingest)
+        if (settings.gemini_api_key and settings.allow_live_llm)
         else "fixture",
         "generatedAt": _now_iso(),
     }
@@ -2630,7 +2630,7 @@ async def spr_brief(body: dict | None = None) -> dict:
     brief = _local_spr_brief(plan)
 
     settings = get_settings()
-    live = bool(getattr(settings, "allow_live_ingest", False)) and bool(
+    live = bool(getattr(settings, "allow_live_llm", True)) and bool(
         getattr(settings, "gemini_api_key", None)
     )
     narrative = ""
@@ -3446,7 +3446,7 @@ async def chat(body: dict | None = None) -> dict:
         pass  # RAG index not built or retrieval failed — degrade gracefully
 
     settings = get_settings()
-    live_mode = bool(getattr(settings, "allow_live_ingest", False)) and bool(
+    live_mode = bool(getattr(settings, "allow_live_llm", True)) and bool(
         getattr(settings, "gemini_api_key", None)
     )
 
