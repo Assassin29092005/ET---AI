@@ -13,7 +13,6 @@ import Backtest from "@/pages/Backtest";
 import Baselines from "@/pages/Baselines";
 import CompoundScenarios from "@/pages/CompoundScenarios";
 import ImpactCascade from "@/pages/ImpactCascade";
-import CostOfInaction from "@/pages/CostOfInaction";
 import ChatDrawer from "@/components/ChatDrawer";
 import CommodityTicker from "@/components/CommodityTicker";
 import { useAppStore } from "@/lib/store";
@@ -49,42 +48,6 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
     ),
   },
   {
-    to: "/sourcing",
-    label: "Sourcing",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m0 0l-8-4m8 4v10l-8-4m8 4l8-4m-8 4l-8 4" />
-      </svg>
-    ),
-  },
-  {
-    to: "/spr",
-    label: "SPR (Reports)",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    to: "/cost",
-    label: "Cost",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  },
-  {
-    to: "/stress-test",
-    label: "Stress Test",
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
     to: "/backtest",
     label: "Backtest",
     icon: (
@@ -95,7 +58,7 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
   },
   {
     to: "/baselines",
-    label: "Baselines",
+    label: "Baseline",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -130,6 +93,33 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
     ),
   },
 ];
+
+function IconSidebar() {
+  return (
+    <aside className="w-16 shrink-0 border-r border-slate-200 bg-white flex flex-col items-center py-4 gap-4">
+      {SIDEBAR_ITEMS.map((item) => (
+        <NavLink
+          key={item.label}
+          to={item.to}
+          className={({ isActive }) =>
+            clsx(
+              "relative flex items-center justify-center w-12 h-12 rounded-xl transition-all duration-150 group",
+              isActive
+                ? "bg-blue-50 text-blue-600 font-semibold"
+                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50",
+            )
+          }
+          title={item.label}
+        >
+          {item.icon}
+          <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
+            {item.label}
+          </span>
+        </NavLink>
+      ))}
+    </aside>
+  );
+}
 
 // Top navigation tabs definition
 interface TopTab {
@@ -167,79 +157,6 @@ const TOP_TABS: TopTab[] = [
     matcher: (path) => path.startsWith("/compound"),
   },
 ];
-
-function IconSidebar() {
-  const [isExpanded, setIsExpanded] = useState<boolean>(() => window.innerWidth >= 1200);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsExpanded(window.innerWidth >= 1200);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  return (
-    <aside
-      className={clsx(
-        "shrink-0 border-r border-slate-200 bg-white flex flex-col py-4 gap-2 transition-all duration-200",
-        isExpanded ? "w-48 px-3" : "w-16 px-2.5 items-center"
-      )}
-    >
-      {/* Navigation Links */}
-      <div className="flex-1 flex flex-col gap-2.5 w-full">
-        {SIDEBAR_ITEMS.map((item) => (
-          <NavLink
-            key={item.label}
-            to={item.to}
-            className={({ isActive }) =>
-              clsx(
-                "relative flex items-center rounded-xl transition-all duration-150 group h-11 shrink-0",
-                isExpanded ? "justify-start px-3.5 gap-3 w-full" : "justify-center w-11",
-                isActive
-                  ? "bg-blue-50 text-blue-600 font-semibold"
-                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-              )
-            }
-            title={isExpanded ? undefined : item.label}
-          >
-            <div className="shrink-0">{item.icon}</div>
-            {isExpanded && (
-              <span className="text-xs font-semibold text-slate-700 group-hover:text-slate-900 transition-colors whitespace-nowrap">
-                {item.label}
-              </span>
-            )}
-            {!isExpanded && (
-              <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
-                {item.label}
-              </span>
-            )}
-          </NavLink>
-        ))}
-      </div>
-
-      {/* Sidebar Toggle Button (at bottom) */}
-      <button
-        type="button"
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-all duration-150 mt-auto shrink-0 self-center"
-        title={isExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
-      >
-        <svg
-          className={clsx("w-5 h-5 transition-transform duration-200", isExpanded && "rotate-180")}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-        </svg>
-      </button>
-    </aside>
-  );
-}
-
-
 
 function TopBar() {
   const clock = useIstClock();
@@ -378,7 +295,6 @@ export default function App() {
               <Route path="/sourcing" element={<Sourcing />} />
               <Route path="/spr" element={<SPR />} />
               <Route path="/baselines" element={<Baselines />} />
-              <Route path="/cost" element={<CostOfInaction />} />
             </Routes>
           </main>
         </div>
