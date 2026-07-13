@@ -16,7 +16,7 @@ import {
 
 const client: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 20000,
+  timeout: 180_000,
   headers: { 'Content-Type': 'application/json' },
 });
 

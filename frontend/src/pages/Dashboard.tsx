@@ -36,7 +36,7 @@ import { RiskTicker } from "@/components/RiskTicker";
 import { SanctionAlertBanner } from "@/components/SanctionAlert";
 import { VesselMap } from "@/components/VesselMap";
 
-const REFRESH_MS = 60_000;
+const REFRESH_MS = 30_000;
 const fmtTimeUtc = fmtIstTime;
 
 const CORRIDOR_PATHS: Record<Corridor, Array<{ lat: number; lon: number }>> = {
