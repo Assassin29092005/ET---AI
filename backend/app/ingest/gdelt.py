@@ -54,7 +54,12 @@ async def fetch_events(
         List of normalized events with keys: timestamp, actors, location, lat,
         lon, tone, event_code, urls.
     """
-    themes = themes or ["ENERGY", "TANKER", "OIL_GAS"]
+    themes = themes or [
+        "ENERGY", "TANKER", "OIL_GAS",
+        "MARITIME", "EMBARGO", "BLOCKADE",
+        "MILITARY", "ARMEDCONFLICT", "SANCTIONS",
+        "ECON_OILPRICE", "TERROR",
+    ]
 
     if not settings.allow_live_ingest:
         log.info("gdelt.fixture_mode", themes=themes, window_hours=window_hours)

@@ -241,12 +241,31 @@ async def _sanctions_signals() -> dict[str, dict[str, Any]]:
 # chokepoint without over-matching on generic geographic mentions. NewsAPI is
 # Boolean OR; GDELT DOC also accepts quoted phrases.
 CORRIDOR_NEWS_QUERIES: dict[str, str] = {
-    "hormuz": '"Strait of Hormuz" OR "Persian Gulf" tanker OR Iran navy OR Hormuz transit',
-    "bab_el_mandeb": '"Bab el-Mandeb" OR "Red Sea" Houthi OR Yemen shipping OR Bab al-Mandab',
-    "malacca": '"Strait of Malacca" OR Indonesia shipping OR Singapore tanker',
-    "south_china_sea": '"South China Sea" shipping OR China coast guard OR Taiwan strait',
-    "cape_of_good_hope": '"Cape of Good Hope" OR South Africa tanker OR Cape rerouting',
-    "suez": '"Suez Canal" OR Egypt transit OR Suez tariff',
+    "hormuz": (
+        '"Strait of Hormuz" OR "Persian Gulf" tanker OR Iran navy OR Hormuz transit '
+        'OR Hormuz attack OR Hormuz bombing OR Hormuz missile OR Hormuz strike '
+        'OR "Persian Gulf" military OR "Gulf of Oman" OR Iran drone OR Hormuz disruption'
+    ),
+    "bab_el_mandeb": (
+        '"Bab el-Mandeb" OR "Red Sea" Houthi OR Yemen shipping OR Bab al-Mandab '
+        'OR "Red Sea" attack OR "Red Sea" missile OR Houthi drone OR "Red Sea" disruption'
+    ),
+    "malacca": (
+        '"Strait of Malacca" OR Indonesia shipping OR Singapore tanker '
+        'OR Malacca piracy OR Malacca incident OR Malacca disruption'
+    ),
+    "south_china_sea": (
+        '"South China Sea" shipping OR China coast guard OR Taiwan strait '
+        'OR "South China Sea" military OR "South China Sea" incident'
+    ),
+    "cape_of_good_hope": (
+        '"Cape of Good Hope" OR South Africa tanker OR Cape rerouting '
+        'OR Cape disruption OR "Cape route" shipping'
+    ),
+    "suez": (
+        '"Suez Canal" OR Egypt transit OR Suez tariff '
+        'OR Suez blockage OR Suez disruption OR "Suez Canal" incident'
+    ),
 }
 
 # Lightweight keyword-based sentiment proxy — we don't ship an NLP model.
@@ -342,10 +361,13 @@ async def _news_signals() -> dict[str, dict[str, Any]]:
 
 
 async def _price_vol_signals() -> dict[str, dict[str, Any]]:
-    """Recent price volatility of each corridor's primary commodity."""
-    from app.api.routes import _load_fixture
+    """Recent price volatility of each corridor's primary commodity.
 
-    prices = _load_fixture("commodity_prices.json") or {}
+    In live mode, fetches real price series from EIA / Alpha Vantage via the
+    commodity_prices ingest module. Falls back to the fixture when live ingest
+    is off or a live fetch fails."""
+    from app.config import get_settings
+
     series_key = {
         "crude_oil": "brent_crude_usd",
         "lng": "lng_jkm_usd",
@@ -353,16 +375,58 @@ async def _price_vol_signals() -> dict[str, dict[str, Any]]:
         "rare_earths": "neodymium_oxide_cny",
     }
 
+    # Map corridor commodity names to the Commodity enum for live fetching.
+    _COMMODITY_ENUM_MAP: dict[str, Any] = {}
+    live_series: dict[str, list[float]] = {}
+
+    if get_settings().allow_live_ingest:
+        try:
+            from app.ingest import commodity_prices as cp
+            from app.models import Commodity as ModelCommodity
+
+            _COMMODITY_ENUM_MAP = {
+                "crude_oil": ModelCommodity.CRUDE_OIL,
+                "lng": ModelCommodity.LNG,
+                "coking_coal": ModelCommodity.COKING_COAL,
+            }
+            import asyncio
+            fetch_tasks = {}
+            for commodity_key, enum_val in _COMMODITY_ENUM_MAP.items():
+                fetch_tasks[commodity_key] = cp.fetch_prices(enum_val, days=14)
+
+            results = await asyncio.gather(*fetch_tasks.values(), return_exceptions=True)
+            for commodity_key, result in zip(fetch_tasks.keys(), results):
+                if isinstance(result, Exception) or not isinstance(result, list):
+                    continue
+                vals = []
+                for p in result:
+                    if isinstance(p, dict):
+                        v = p.get("price") or p.get("value")
+                        if isinstance(v, (int, float)):
+                            vals.append(float(v))
+                if vals:
+                    live_series[commodity_key] = vals
+        except Exception:
+            pass  # fall through to fixture
+
+    # Fixture fallback for commodities not fetched live (or all, when live is off).
+    from app.api.routes import _load_fixture
+    fixture_prices = _load_fixture("commodity_prices.json") or {}
+
     def _vol(commodity: str) -> float:
-        key = series_key.get(commodity)
-        if not key:
-            return 0.3
-        series = prices.get(key, [])
-        vals = [
-            float(p.get("value"))
-            for p in series[-14:]
-            if isinstance(p, dict) and isinstance(p.get("value"), (int, float))
-        ]
+        # Prefer live data if available.
+        if commodity in live_series:
+            vals = live_series[commodity][-14:]
+        else:
+            key = series_key.get(commodity)
+            if not key:
+                return 0.3
+            series = fixture_prices.get(key, [])
+            vals = [
+                float(p.get("value"))
+                for p in series[-14:]
+                if isinstance(p, dict) and isinstance(p.get("value"), (int, float))
+            ]
         if len(vals) < 3:
             return 0.3
         mean = statistics.mean(vals)

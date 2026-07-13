@@ -33,8 +33,9 @@ _subscribers: list[asyncio.Queue] = []
 _last_snapshot: dict[str, dict[str, Any]] = {}
 
 # Configuration knobs. Tuned for demo + NewsAPI free tier (100 calls/day).
-# At 600s (10min) we make ≤6 NewsAPI calls / cycle = 864 / day → safely under.
-SCORE_REFRESH_SECONDS = 600
+# At 300s (5min) we make ≤6 NewsAPI calls / cycle = 1,728 / day → safe headroom
+# with fallback to GDELT DOC (no key) when quota exhausted.
+SCORE_REFRESH_SECONDS = 300
 SCORE_CHANGE_THRESHOLD = 2.0  # absolute point change that triggers a WS push
 HISTORY_KEEP_PER_CORRIDOR = 500
 
@@ -170,3 +171,13 @@ async def stop() -> None:
             _task.cancel()
         _task = None
     _stop_event = None
+
+
+async def force_refresh() -> dict[str, dict[str, Any]]:
+    """Trigger an immediate out-of-cycle score recomputation.
+
+    Used by the API to let the operator (or an agentic loop) force a refresh
+    when a breaking event is known — e.g. Hormuz bombings, Suez blockage.
+    Returns the fresh snapshot."""
+    await _refresh_once()
+    return dict(_last_snapshot)

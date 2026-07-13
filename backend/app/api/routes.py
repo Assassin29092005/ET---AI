@@ -2727,7 +2727,15 @@ def gdelt_context_url(event: dict) -> str:
 
 @router.get("/feed")
 async def feed(limit: int = Query(default=50)) -> list[dict]:
-    events = _load_fixture("gdelt_events.json") or []
+    settings = get_settings()
+    if settings.allow_live_ingest:
+        try:
+            from app.ingest import gdelt
+            events = await gdelt.fetch_events(window_hours=24)
+        except Exception:
+            events = _load_fixture("gdelt_events.json") or []
+    else:
+        events = _load_fixture("gdelt_events.json") or []
     feed_items = []
     for i, e in enumerate(events[:limit]):
         feed_items.append({
