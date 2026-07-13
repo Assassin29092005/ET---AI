@@ -6,9 +6,11 @@ demo-friendly properties:
 1. A small in-memory LRU cache keyed on the prompt hash. Repeated runs during a
    pitch demo return instantly without a second network round-trip.
 
-2. A fixture fallback path. When settings.allow_live_ingest is False OR no
+2. A fixture fallback path. When settings.allow_live_llm is False OR no
    GEMINI_API_KEY is configured, the client never calls Gemini and instead
    returns pre-canned strings loaded from data/fixtures/llm_responses.json.
+   Note this is decoupled from allow_live_ingest (data signals): a Gemini key
+   alone is enough to make the analyst chat and narratives live.
 
 Model selection:
   - settings.gemini_model (default gemini-2.5-flash) for synthesis (scenario
@@ -47,8 +49,8 @@ logger = logging.getLogger(__name__)
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "data" / "fixtures" / "llm_responses.json"
 _CACHE_MAXSIZE = 64
-_DEFAULT_MAX_TOKENS = 1024
-_BRIEF_MAX_TOKENS = 2048
+_DEFAULT_MAX_TOKENS = 2048
+_BRIEF_MAX_TOKENS = 4096
 
 
 @lru_cache(maxsize=1)
@@ -84,8 +86,8 @@ class LLMClient:
     asyncio.to_thread so the FastAPI event loop is not blocked.
     """
 
-    DEFAULT_SYNTHESIS_MODEL = "gemini-2.5-flash"
-    DEFAULT_CLASSIFIER_MODEL = "gemini-2.5-flash-lite-preview-06-17"
+    DEFAULT_SYNTHESIS_MODEL = "gemini-flash-latest"
+    DEFAULT_CLASSIFIER_MODEL = "gemini-flash-lite-latest"
 
     def __init__(self, settings: Any | None = None) -> None:
         if settings is None:
@@ -100,7 +102,9 @@ class LLMClient:
         self._classifier_model: str = getattr(
             settings, "gemini_model_fast", self.DEFAULT_CLASSIFIER_MODEL
         )
-        self._allow_live: bool = bool(getattr(settings, "allow_live_ingest", False))
+        # LLM live-mode is decoupled from data ingestion: a Gemini key alone
+        # enables live calls. allow_live_llm (default True) can force fixtures.
+        self._allow_live_llm: bool = bool(getattr(settings, "allow_live_llm", True))
         self._cache: OrderedDict[str, str] = OrderedDict()
         self._cache_lock = asyncio.Lock()
         self._configured = False
@@ -139,7 +143,7 @@ class LLMClient:
                 self._cache.popitem(last=False)
 
     def _is_fixture_mode(self) -> bool:
-        return (not self._allow_live) or (not self._api_key)
+        return (not self._allow_live_llm) or (not self._api_key)
 
     async def _complete(
         self,
@@ -246,9 +250,9 @@ class LLMClient:
             max_tokens=_BRIEF_MAX_TOKENS,
         )
 
-    async def chat(self, question: str, context: dict[str, Any]) -> str:
+    async def chat(self, question: str, context: dict[str, Any], retrieved_knowledge: list[dict[str, str]] | None = None) -> str:
         """Conversational endpoint for the ask-the-analyst chat drawer."""
-        prompt = build_chat_prompt(question, context)
+        prompt = build_chat_prompt(question, context, retrieved_knowledge=retrieved_knowledge)
         return await self._complete(
             model=self._synthesis_model,
             user_prompt=prompt,

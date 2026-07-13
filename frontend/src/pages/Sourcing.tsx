@@ -188,6 +188,8 @@ export default function Sourcing() {
     return `Top open source: ${top.country} (${top.importSharePct.toFixed(0)}% of current imports). ${cleared} of ${openOptions.length} open options pass sanctions check. Composite risk ${top.routeRiskScore.toFixed(0)} via ${top.routeCorridor}.`;
   }, [options]);
 
+  const computeTimeMs = options.length > 0 ? (options[0] as unknown as Record<string, unknown>).computeTimeMs as number | undefined : undefined;
+
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -195,7 +197,7 @@ export default function Sourcing() {
           <p className="text-[10px] uppercase tracking-wider text-blue-600 font-bold">Procurement</p>
           <h1 className="mt-1 text-2xl font-bold text-white leading-tight">Sourcing Intelligence</h1>
           <p className="mt-1 text-xs text-slate-400 font-medium">
-            Ranks suppliers by live corridor risk + import share + lead-time, and surfaces demand-side substitutes.
+            6-factor composite: corridor risk + import share + lead-time + spot pricing + tanker availability + grade compatibility.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -244,6 +246,19 @@ export default function Sourcing() {
       {recommendation && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 font-medium shadow-sm">
           {recommendation}
+        </div>
+      )}
+
+      {!loading && options.length > 0 && (
+        <div className="flex items-center gap-3 text-[11px] font-mono text-slate-400">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 shadow-sm">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-[pulse_2s_ease-in-out_1]" />
+            Ranked {options.filter(o => o.routeStatus !== 'closed').length} open alternatives
+            {computeTimeMs != null && <> in <span className="font-bold text-slate-600">{computeTimeMs.toFixed(0)} ms</span></>}
+          </span>
+          <span className="text-slate-300">
+            6-factor composite · spot-linked pricing · AIS tanker proxy · grade match
+          </span>
         </div>
       )}
 
@@ -338,8 +353,18 @@ export default function Sourcing() {
 
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 bg-slate-50">
-            <h3 className="text-sm font-bold text-slate-800">
-              {COMMODITY_LABEL[commodity]} Ranked Alternatives
+            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-3">
+              <span>{COMMODITY_LABEL[commodity]} Ranked Alternatives</span>
+              <a
+                href={`/api/export/sourcing/${commodity}.csv`}
+                download
+                className="inline-flex items-center gap-1 rounded bg-white border border-slate-200 hover:border-slate-300 px-2 py-0.5 text-[10px] font-bold text-slate-600 transition-colors shadow-sm"
+              >
+                <svg className="w-3 h-3 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Export CSV
+              </a>
             </h3>
             <CommodityBadge commodity={commodity} size="md" />
           </div>

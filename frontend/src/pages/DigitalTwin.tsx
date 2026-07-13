@@ -38,6 +38,30 @@ interface WhatIf {
 
 const REFRESH_MS = 30_000;
 
+/**
+ * Haversine distance between two lat/lon points in nautical miles.
+ * 1 NM = 1 minute of arc of latitude = 1.852 km.
+ */
+function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R_NM = 3440.065; // Earth radius in nautical miles
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R_NM * Math.asin(Math.sqrt(a));
+}
+
+/** Total polyline distance in nautical miles. */
+function routeDistanceNm(path: [number, number][]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i++) {
+    total += haversineNm(path[i - 1][0], path[i - 1][1], path[i][0], path[i][1]);
+  }
+  return Math.round(total);
+}
+
 const CORRIDOR_COORDS: Record<Corridor, { lat: number; lon: number; label: string }> = {
   hormuz: { lat: 26.5, lon: 56.2, label: 'Strait of Hormuz' },
   bab_el_mandeb: { lat: 12.6, lon: 43.4, label: 'Bab el-Mandeb' },
@@ -402,6 +426,7 @@ export default function DigitalTwin() {
                 onChange={() => setLayers((prev) => ({ ...prev, vedasOverlay: !prev.vedasOverlay }))}
                 label="VEDAS Overlay (ISRO)"
               />
+
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <button
@@ -438,7 +463,7 @@ export default function DigitalTwin() {
                   onChange={(e) => setSelectedWhatIfCorridor(e.target.value as Corridor | '')}
                   className="input-op w-full font-medium"
                 >
-                  <option value="">Suez Canal Blockage</option>
+                  <option value="">Select</option>
                   {corridors.map((c) => (
                     <option key={c.corridor} value={c.corridor}>
                       Close {CORRIDOR_LABEL[c.corridor] ?? c.corridor}
@@ -536,6 +561,7 @@ export default function DigitalTwin() {
                   const status = effRouteStatus(r.corridor, r.status);
                   const color = STATUS_FILL[status] ?? '#64748b';
                   const dashed = status === 'closed' || status === 'disrupted';
+                  const distNm = routeDistanceNm(r.path as [number, number][]);
                   return (
                     <Polyline
                       key={r.id}
@@ -550,7 +576,7 @@ export default function DigitalTwin() {
                       <Tooltip sticky>
                         <span className="font-mono text-[11px]">
                           {r.sourceLabel} → {r.destLabel} · {r.commodity.replace(/_/g, ' ')} ·{' '}
-                          {r.sharePct}% · {status}
+                          {r.sharePct}% · {status} · {distNm.toLocaleString()} NM
                         </span>
                       </Tooltip>
                     </Polyline>

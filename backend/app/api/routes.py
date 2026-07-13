@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -146,6 +147,16 @@ TWIN_CORRIDOR_CAPACITY: dict[str, int] = {
     "south_china_sea": 14,
     "cape_of_good_hope": 12,
     "suez": 8,
+}
+
+# Pipeline timing state — records the last measured latency for key stages
+# so the dashboard can show "signal→recommendation in Xms".
+_PIPELINE_TIMING: dict[str, float] = {
+    "scores_ms": 0.0,
+    "sourcing_ms": 0.0,
+    "scenario_ms": 0.0,
+    "last_e2e_ms": 0.0,
+    "updated_at": "",
 }
 
 
@@ -395,6 +406,75 @@ async def healthz() -> dict:
         "liveIngest": settings.allow_live_ingest,
         "fixturesLoaded": len(fixtures),
     }
+
+
+@router.get("/pipeline-timing")
+async def pipeline_timing() -> dict:
+    """Return last measured signal-to-recommendation pipeline latencies.
+
+    Used by the dashboard to show 'scored and ranked N alternatives in Xms'.
+    """
+    return {
+        "scoresMs": _PIPELINE_TIMING.get("scores_ms", 0.0),
+        "sourcingMs": _PIPELINE_TIMING.get("sourcing_ms", 0.0),
+        "scenarioMs": _PIPELINE_TIMING.get("scenario_ms", 0.0),
+        "lastE2eMs": _PIPELINE_TIMING.get("last_e2e_ms", 0.0),
+        "updatedAt": _PIPELINE_TIMING.get("updated_at", ""),
+    }
+
+
+@router.get("/rag/status")
+async def rag_status() -> dict:
+    """RAG knowledge store health check."""
+    try:
+        from app.llm.rag import chunk_count, is_ready, using_gemini_embeddings
+        return {
+            "ready": is_ready(),
+            "chunkCount": chunk_count(),
+            "embeddingType": "gemini" if using_gemini_embeddings() else "tfidf",
+            "asOf": _now_iso(),
+        }
+    except Exception:
+        return {"ready": False, "chunkCount": 0, "embeddingType": "none", "asOf": _now_iso()}
+
+
+# --- Agentic Orchestrator API ------------------------------------------------
+
+@router.get("/agent/actions")
+async def agent_actions(limit: int = Query(default=20, ge=1, le=50)) -> dict:
+    """Return the most recent autonomous agent actions."""
+    try:
+        from app.engines.orchestrator import get_actions
+        actions = get_actions(limit=limit)
+        return {"actions": actions, "count": len(actions), "asOf": _now_iso()}
+    except Exception:
+        return {"actions": [], "count": 0, "asOf": _now_iso()}
+
+
+@router.get("/agent/config")
+async def agent_config_get() -> dict:
+    """Return current orchestrator configuration."""
+    try:
+        from app.engines.orchestrator import get_config
+        return {**get_config(), "asOf": _now_iso()}
+    except Exception:
+        return {"threshold": 70.0, "cooldown_seconds": 600, "enabled": True, "asOf": _now_iso()}
+
+
+@router.post("/agent/config")
+async def agent_config_update(body: dict | None = None) -> dict:
+    """Update orchestrator configuration (threshold, cooldown, enabled)."""
+    body = body or {}
+    try:
+        from app.engines.orchestrator import update_config
+        result = update_config(
+            threshold=body.get("threshold"),
+            cooldown_seconds=body.get("cooldownSeconds"),
+            enabled=body.get("enabled"),
+        )
+        return {**result, "asOf": _now_iso()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/baselines")
@@ -704,6 +784,8 @@ async def get_scores(commodity: str | None = Query(default=None)) -> list[dict]:
         from app.engines import live_scores
         from app import scheduler
 
+        t0 = time.perf_counter()
+
         # Prefer the scheduler's warm snapshot — it's the exact same data
         # compute_live_corridor_signals would produce, just already computed.
         sig = scheduler.last_snapshot()
@@ -722,6 +804,11 @@ async def get_scores(commodity: str | None = Query(default=None)) -> list[dict]:
                 out.append(_risk_score_dict(corridor, comm, _seeded_score(corridor, comm)))
                 continue
             out.append(_live_score_dict(corridor, comm, csig, drivers_cache.get(corridor, [])))
+
+        scores_ms = round((time.perf_counter() - t0) * 1000, 1)
+        _PIPELINE_TIMING["scores_ms"] = scores_ms
+        _PIPELINE_TIMING["updated_at"] = _now_iso()
+
         return out
     except Exception:  # noqa: BLE001 — never let scoring crash the dashboard
         return [
@@ -1258,14 +1345,27 @@ async def twin_state() -> dict:
             })
     vessel_count = len(vessel_positions) if ais_source == "live" else (fixture_count or 60)
 
-    corridor_status = {
-        "hormuz": "congested",
-        "bab_el_mandeb": "disrupted",
-        "malacca": "open",
-        "south_china_sea": "congested",
-        "cape_of_good_hope": "open",
-        "suez": "congested",
-    }
+    # Compute live corridor statuses based on risk scores to avoid hardcoding
+    live_scores_list = await get_scores(commodity=None)
+    max_scores: dict[str, float] = {}
+    for s in live_scores_list:
+        c_code = s.get("corridor")
+        val = float(s.get("score") or 0.0)
+        if c_code:
+            max_scores[c_code] = max(max_scores.get(c_code, 0.0), val)
+
+    corridor_status: dict[str, str] = {}
+    for c_code in ["hormuz", "bab_el_mandeb", "malacca", "south_china_sea", "cape_of_good_hope", "suez"]:
+        score = max_scores.get(c_code, 0.0)
+        if score >= 80.0:
+            status = "closed"
+        elif score >= 70.0:
+            status = "disrupted"
+        elif score >= 40.0:
+            status = "congested"
+        else:
+            status = "open"
+        corridor_status[c_code] = status
     throughput = {
         "hormuz": 19.5,
         "bab_el_mandeb": 9.2,
@@ -1624,19 +1724,53 @@ async def sourcing(
         raise HTTPException(status_code=400, detail=f"Unknown commodity: {commodity}") from exc
 
     overrides = await _live_risk_overrides(disruptedCorridor, severity)
+
+    # Build the three new signal dicts for the engine's 6-factor composite.
+    # Spot prices: per-corridor landed price for this commodity.
+    spot_price_base, price_unit, is_spot = _spot_price(commodity)
+    spot_prices_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        risk_frac = overrides.get(eng_label, 0.3)
+        congestion_h = float(TWIN_AVG_DELAY_HOURS.get(sc_key, 0))
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        t_util = max(0.0, min(1.0, vessels / capacity))
+        risk_prem = max(0.0, (risk_frac - 0.30))
+        freight_prem = 0.06 * t_util + (congestion_h / 24.0) * 0.005
+        spot_prices_dict[eng_label] = round(spot_price_base * (1.0 + risk_prem + freight_prem), 2)
+
+    # Tanker utilisation: per-corridor [0,1] ratio.
+    tanker_util_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        tanker_util_dict[eng_label] = max(0.0, min(1.0, vessels / capacity))
+
+    # Grade compatibility: per-country flag.
+    grade_data_dict: dict[str, str] = {}
+    for c_name in _COUNTRY_CRUDE_GRADE:
+        flag, _ = _grade_compat(c_name, commodity)
+        grade_data_dict[c_name] = flag
+
+    t_start = time.perf_counter()
     try:
         options = await sourcing_engine.rank_alternatives(
-            sourcing_commodity, risk_overrides=overrides
+            sourcing_commodity,
+            risk_overrides=overrides,
+            spot_prices=spot_prices_dict,
+            tanker_utilisation=tanker_util_dict,
+            grade_data=grade_data_dict,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    sourcing_ms = round((time.perf_counter() - t_start) * 1000, 1)
+    _PIPELINE_TIMING["sourcing_ms"] = sourcing_ms
+    _PIPELINE_TIMING["last_e2e_ms"] = sourcing_ms
+    _PIPELINE_TIMING["updated_at"] = _now_iso()
 
     disrupted_engine = (
         SCORE_CORRIDOR_TO_ENGINE.get(disruptedCorridor) if disruptedCorridor else None
     )
-
-    # Spot-linked price base (falls back to planning base if no series exists).
-    spot_price, price_unit, is_spot = _spot_price(commodity)
 
     # First pass: classify each supplier's route status and total the share of
     # the suppliers still open, so recommended volume can be re-normalised onto
@@ -1692,7 +1826,7 @@ async def sourcing(
         # Freight premium is capped so it doesn't dominate the score.
         risk_premium = (risk - 30) / 100.0
         freight_premium = 0.06 * tanker_util + (congestion_hours / 24.0) * 0.005
-        landed_price = round(spot_price * (1.0 + risk_premium + freight_premium), 2)
+        landed_price = round(spot_price_base * (1.0 + risk_premium + freight_premium), 2)
 
         grade_flag, grade_note = _grade_compat(country, commodity)
 
@@ -1711,7 +1845,7 @@ async def sourcing(
             "importSharePct": import_share_pct,
             "volumeMb": volume,
             "priceUsd": landed_price,
-            "spotPriceUsd": round(spot_price, 2),
+            "spotPriceUsd": round(spot_price_base, 2),
             "priceUnit": price_unit,
             "priceSource": "spot" if is_spot else "planning",
             "leadTimeDays": lead,
@@ -1724,9 +1858,13 @@ async def sourcing(
             "vesselsInCorridor": vessels,
             "gradeCompat": grade_flag,
             "gradeNote": grade_note,
+            "priceCompetitiveness": float(getattr(opt, "price_competitiveness", 0.5)),
+            "tankerAvailabilityScore": float(getattr(opt, "tanker_availability_score", 0.5)),
+            "gradeMatchScore": float(getattr(opt, "grade_match_score", 0.5)),
             "sanctionsCheck": "flag" if risk > 60 else "clear",
             "carbonIntensity": round(8.0 + (rank * 0.4), 2),
             "notes": rationale,
+            "computeTimeMs": sourcing_ms,
         })
     return out
 
@@ -1959,7 +2097,7 @@ async def sourcing_cascade_analyse(
         "narrative": narrative,
         "rankedOptions": options_payload,
         "riskSnapshot": risk_snapshot,
-        "model": "gemini-2.5-flash" if get_settings().gemini_api_key and get_settings().allow_live_ingest else "fixture",
+        "model": get_settings().gemini_model if get_settings().gemini_api_key and get_settings().allow_live_llm else "fixture",
         "generatedAt": _now_iso(),
     }
 
@@ -2017,8 +2155,8 @@ async def impact_cascade(body: dict | None = None) -> dict:
         **payload,
         "intensity": round(intensity, 2),
         "narrative": narrative,
-        "model": "gemini-2.5-flash"
-        if (settings.gemini_api_key and settings.allow_live_ingest)
+        "model": settings.gemini_model
+        if (settings.gemini_api_key and settings.allow_live_llm)
         else "fixture",
         "generatedAt": _now_iso(),
     }
@@ -2492,7 +2630,7 @@ async def spr_brief(body: dict | None = None) -> dict:
     brief = _local_spr_brief(plan)
 
     settings = get_settings()
-    live = bool(getattr(settings, "allow_live_ingest", False)) and bool(
+    live = bool(getattr(settings, "allow_live_llm", True)) and bool(
         getattr(settings, "gemini_api_key", None)
     )
     narrative = ""
@@ -2962,6 +3100,165 @@ async def stress_test() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Export endpoints (Feature #14 — PDF/CSV)
+# ---------------------------------------------------------------------------
+
+@router.get("/export/sourcing/{commodity}.csv")
+async def export_sourcing_csv(commodity: str) -> Response:
+    """Export the sourcing table for a commodity as a downloadable CSV."""
+    import csv
+    import io
+
+    try:
+        sourcing_commodity = sourcing_engine.Commodity(commodity)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown commodity: {commodity}") from exc
+
+    overrides = await _live_risk_overrides(None, 1.0)
+
+    # Build the three signal dicts for the 6-factor composite to match the UI ranking
+    spot_price_base, price_unit, is_spot = _spot_price(commodity)
+    spot_prices_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        risk_frac = overrides.get(eng_label, 0.3)
+        congestion_h = float(TWIN_AVG_DELAY_HOURS.get(sc_key, 0))
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        t_util = max(0.0, min(1.0, vessels / capacity))
+        risk_prem = max(0.0, (risk_frac - 0.30))
+        freight_prem = 0.06 * t_util + (congestion_h / 24.0) * 0.005
+        spot_prices_dict[eng_label] = round(spot_price_base * (1.0 + risk_prem + freight_prem), 2)
+
+    tanker_util_dict: dict[str, float] = {}
+    for eng_label, sc_key in ENGINE_TO_SCORE_CORRIDOR.items():
+        vessels = TWIN_VESSEL_COUNT.get(sc_key, 0)
+        capacity = TWIN_CORRIDOR_CAPACITY.get(sc_key, 1) or 1
+        tanker_util_dict[eng_label] = max(0.0, min(1.0, vessels / capacity))
+
+    grade_data_dict: dict[str, str] = {}
+    for c_name in _COUNTRY_CRUDE_GRADE:
+        flag, _ = _grade_compat(c_name, commodity)
+        grade_data_dict[c_name] = flag
+
+    options = await sourcing_engine.rank_alternatives(
+        sourcing_commodity,
+        risk_overrides=overrides,
+        spot_prices=spot_prices_dict,
+        tanker_utilisation=tanker_util_dict,
+        grade_data=grade_data_dict,
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Rank", "Country", "Composite Score", "Risk Score",
+        "Historical Share", "Lead Time Score", "Price Competitiveness",
+        "Tanker Availability", "Grade Match", "Primary Corridor", "Rationale",
+    ])
+    for i, opt in enumerate(options, 1):
+        writer.writerow([
+            i, opt.country, opt.composite_score, opt.current_risk,
+            opt.historical_share, opt.lead_time_score,
+            opt.price_competitiveness, opt.tanker_availability_score,
+            opt.grade_match_score, opt.primary_corridor, opt.rationale,
+        ])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="sourcing_{commodity}.csv"'},
+    )
+
+
+@router.get("/export/brief.html")
+async def export_brief_html() -> Response:
+    """Export the executive brief as a downloadable HTML report with print-friendly CSS."""
+    brief = await executive_brief()
+    headline = brief.get("headline", "Executive Brief")
+    summary = brief.get("summary", "")
+    generated_at = brief.get("generatedAt", _now_iso())
+    market = brief.get("marketSnapshot", {})
+
+    # Build market snapshot rows
+    market_rows = ""
+    if isinstance(market, dict):
+        for key, val in market.items():
+            label = key.replace("_", " ").title()
+            market_rows += f"<tr><td style='padding:6px 12px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#475569'>{label}</td><td style='padding:6px 12px;border-bottom:1px solid #e2e8f0;color:#1e293b'>{val}</td></tr>"
+
+    # Build recommendations
+    recs_html = ""
+    recommendations = brief.get("recommendations", [])
+    if isinstance(recommendations, list):
+        for rec in recommendations:
+            if isinstance(rec, str):
+                recs_html += f"<li style='margin-bottom:8px;color:#334155'>{rec}</li>"
+            elif isinstance(rec, dict):
+                recs_html += f"<li style='margin-bottom:8px;color:#334155'>{rec.get('text', str(rec))}</li>"
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Executive Brief — ImportRisk Analyze</title>
+<style>
+  @media print {{ body {{ margin: 1cm; }} }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #1e293b; }}
+  .header {{ border-bottom: 3px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; }}
+  .header h1 {{ font-size: 22px; color: #0f172a; margin: 0 0 8px; }}
+  .header .meta {{ font-size: 12px; color: #64748b; }}
+  .summary {{ background: #f8fafc; border-left: 4px solid #2563eb; padding: 16px 20px; margin-bottom: 24px; font-size: 14px; line-height: 1.7; color: #334155; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 24px; }}
+  .section-title {{ font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin: 24px 0 12px; }}
+  .footer {{ border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 32px; font-size: 11px; color: #94a3b8; }}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>{headline}</h1>
+  <div class="meta">Generated: {generated_at} &nbsp;|&nbsp; ImportRisk Analyze — AI-Driven Energy Supply Chain Resilience</div>
+</div>
+<div class="summary">{summary}</div>
+<div class="section-title">Market Snapshot</div>
+<table>{market_rows}</table>
+{"<div class='section-title'>Recommendations</div><ul>" + recs_html + "</ul>" if recs_html else ""}
+<div class="footer">
+  This brief was generated autonomously by the ImportRisk Analyze platform.
+  All figures are derived from live signals and model assumptions documented in the Assumption Ledger.
+</div>
+</body>
+</html>"""
+
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={"Content-Disposition": 'attachment; filename="executive_brief.html"'},
+    )
+
+
+@router.get("/export/scores.csv")
+async def export_scores_csv() -> Response:
+    """Export current risk scores as CSV."""
+    import csv
+    import io
+
+    scores = await get_scores(commodity=None)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Corridor", "Commodity", "Score", "Tier", "As Of"])
+    for s in scores:
+        writer.writerow([
+            s.get("corridor", ""), s.get("commodity", ""),
+            s.get("score", ""), s.get("tier", ""), s.get("asOf", ""),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="risk_scores.csv"'},
+    )
+
+
 _CHAT_COMMODITY_TERMS: list[tuple[str, str]] = [
     ("coking coal", "coking_coal"),
     ("thermal coal", "thermal_coal"),
@@ -3138,12 +3435,22 @@ async def chat(body: dict | None = None) -> dict:
         "history": history,
     }
 
+    # --- RAG retrieval step ---
+    # Retrieve relevant knowledge chunks from the indexed documentation and
+    # fixture databases. This turns prompt engineering into genuine RAG.
+    retrieved_knowledge: list[dict[str, str]] = []
+    try:
+        from app.llm.rag import retrieve as rag_retrieve
+        retrieved_knowledge = rag_retrieve(question, k=5)
+    except Exception:
+        pass  # RAG index not built or retrieval failed — degrade gracefully
+
     settings = get_settings()
-    live_mode = bool(getattr(settings, "allow_live_ingest", False)) and bool(
+    live_mode = bool(getattr(settings, "allow_live_llm", True)) and bool(
         getattr(settings, "gemini_api_key", None)
     )
 
-    # In live mode call Gemini with the correct (question, context) signature.
+    # In live mode call Gemini with the correct (question, context, rag) signature.
     # In fixture mode the LLM client only returns a single canned string, so we
     # skip it entirely and answer from the question-aware local responder —
     # otherwise every question collapses to the same reply.
@@ -3153,7 +3460,7 @@ async def chat(body: dict | None = None) -> dict:
             from app.llm.summarise import LLMClient  # type: ignore
 
             client = LLMClient(settings)
-            answer = await client.chat(question, context) or ""
+            answer = await client.chat(question, context, retrieved_knowledge=retrieved_knowledge) or ""
         except Exception:
             answer = ""
         if answer.strip().startswith("[fixture"):
@@ -3161,6 +3468,23 @@ async def chat(body: dict | None = None) -> dict:
 
     if not answer.strip():
         answer = _local_chat_answer(question, top_scores, feed_items, scenario_list, brief)
+        # If local fallback returned a "not enough data" answer and we have
+        # RAG knowledge, try to answer from the retrieved chunks directly.
+        if "not enough data" in answer.lower() and retrieved_knowledge:
+            rag_answer_parts = []
+            for chunk in retrieved_knowledge[:3]:
+                source = chunk.get("source", "")
+                section = chunk.get("section", "")
+                text = chunk.get("text", "")
+                if text:
+                    rag_answer_parts.append(
+                        f"From {source} ({section}): {text[:300]}"
+                    )
+            if rag_answer_parts:
+                answer = (
+                    "Based on the system's internal documentation:\n\n"
+                    + "\n\n".join(rag_answer_parts)
+                )
 
     citations: list[dict] = [
         {"label": "Live corridor risk scores", "source": "/api/scores"},
@@ -3168,10 +3492,16 @@ async def chat(body: dict | None = None) -> dict:
         {"label": "Scenario library", "source": "/api/scenarios"},
         {"label": "Executive brief", "source": "/api/executive-brief"},
     ]
+    # Add RAG source citations
+    if retrieved_knowledge:
+        rag_sources = sorted({c.get("source", "") for c in retrieved_knowledge if c.get("source")})
+        for src in rag_sources:
+            citations.append({"label": f"Retrieved: {src}", "source": f"rag://{src}"})
 
     return {
         "answer": answer,
         "citations": citations,
+        "ragChunksUsed": len(retrieved_knowledge),
         "generatedAt": _now_iso(),
     }
 
