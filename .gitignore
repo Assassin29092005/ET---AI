@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv-local/
 venv/
 .pytest_cache/
 .mypy_cache/
@@ -14,12 +15,12 @@ dist/
 
 # Node
 node_modules/
-dist/
-build/
 .next/
 .turbo/
 .parcel-cache/
 *.tsbuildinfo
+frontend/dist/
+frontend/.vite/
 
 # Env / secrets
 .env
@@ -27,15 +28,13 @@ build/
 .env.*.local
 *.secret
 
-# Data caches (raw ingested data lives outside repo)
+# Data caches
 .cache/
 data/raw/
 data/processed/
 *.parquet
 *.sqlite
 *.db
-# SQLite WAL journal sidecars — never commit; they're process-specific and
-# corruptible if pulled onto a machine with a different WAL pointer.
 *.db-shm
 *.db-wal
 *.db-journal
@@ -44,7 +43,7 @@ data/processed/
 *.log
 logs/
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 *.swp
@@ -57,7 +56,20 @@ demo_outputs/
 recorded_demo/
 *.mp4
 *.mov
-!docs/**/*.mp4
 
+# Docs folder (internal notes, not needed in repo)
+docs/
 
+# Tests (not needed in production repo)
+backend/tests/
+
+# AI agent config (local-only)
+.agents/
+.claude/
+AGENTS.md
+CLAUDE.md
 MD_FILES/
+
+# Temp / scratch files
+backend/_test_*.py
+*.tmp
