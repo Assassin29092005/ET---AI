@@ -84,6 +84,19 @@ async def refresh_live_baselines() -> dict[str, dict]:
     values. Returns the LIVE_BASELINES snapshot for logging."""
     if not _settings.allow_live_ingest:
         log.info("baselines.skip_fixture_mode")
+        # Seed the 5 core display values from documented calibration constants
+        # so the /api/baselines endpoint (and the Baselines page) is never empty.
+        from app.api import routes
+        from app.engines import scenarios as scen
+        _stamp("brent_usd_bbl", routes.BASE_BRENT, "fixture (FY26 calibration)")
+        _stamp("henry_hub_usd_mmbtu", scen.BASELINE.get("jkm_usd_mmbtu", 12.5),
+               "fixture (FY26 calibration)")
+        _stamp("copper_usd_t", 8400.0, "fixture (FY26 calibration)")
+        _stamp("inr_per_usd", scen.BASELINE.get("inr_per_usd", 83.5),
+               "fixture (FY26 calibration)")
+        mbd = scen.BASELINE.get("india_crude_import_mbd", 5.10)
+        bill = round(mbd * 1000.0 * routes.BASE_BRENT / 1000.0, 1)
+        _stamp("india_import_bill_usdm", bill, "derived: crude_mbd × Brent")
         return LIVE_BASELINES
 
     # Fan out — all five fetches are independent.
@@ -108,20 +121,33 @@ async def refresh_live_baselines() -> dict[str, dict]:
         routes.BASE_BRENT = brent
         scenarios.BASELINE["brent_usd_bbl"] = brent
         _stamp("brent_usd_bbl", brent, "EIA/Alpha Vantage")
+    else:
+        _stamp("brent_usd_bbl", routes.BASE_BRENT, "fixture (FY26 calibration)")
     if lng:
         scenarios.BASELINE["jkm_usd_mmbtu"] = lng
         _stamp("henry_hub_usd_mmbtu", lng, "EIA")
+    else:
+        _stamp("henry_hub_usd_mmbtu", scenarios.BASELINE.get("jkm_usd_mmbtu", 12.5),
+               "fixture (FY26 calibration)")
     if copper:
         _stamp("copper_usd_t", copper, "Alpha Vantage")
+    else:
+        _stamp("copper_usd_t", 8400.0, "fixture (FY26 calibration)")
     if fx:
+        scenarios.BASELINE["inr_per_usd"] = fx
         _stamp("inr_per_usd", fx, "Frankfurter (ECB)")
-        # Recompute the daily import-bill baseline live: it's just
-        # crude_import_mbd × 1000 × $/bbl, all live now.
-        if brent:
-            mbd = scenarios.BASELINE.get("india_crude_import_mbd", 5.10)
-            routes.BASE_IMPORT_COST_USDM = round(mbd * 1000.0 * brent / 1000.0, 1)
-            _stamp("india_import_bill_usdm", routes.BASE_IMPORT_COST_USDM,
-                   "derived: crude_mbd × Brent")
+    else:
+        _stamp("inr_per_usd", 83.5, "fixture (FY26 calibration)")
+
+    # Daily import bill: derived from crude_mbd × Brent. Compute from
+    # whichever Brent value we ended up with (live or fixture fallback).
+    effective_brent = brent if brent else routes.BASE_BRENT
+    mbd = scenarios.BASELINE.get("india_crude_import_mbd", 5.10)
+    bill = round(mbd * 1000.0 * effective_brent / 1000.0, 1)
+    if brent and fx:
+        routes.BASE_IMPORT_COST_USDM = bill
+    _stamp("india_import_bill_usdm", bill, "derived: crude_mbd × Brent")
+
     if isinstance(pumps, dict):
         if "diesel" in pumps:
             routes.BASE_DIESEL_INR = pumps["diesel"]
