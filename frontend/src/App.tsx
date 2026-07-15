@@ -11,6 +11,7 @@ import ScenarioCompare from "@/pages/ScenarioCompare";
 import StressTest from "@/pages/StressTest";
 import Backtest from "@/pages/Backtest";
 import Baselines from "@/pages/Baselines";
+import CostOfInaction from "@/pages/CostOfInaction";
 import CompoundScenarios from "@/pages/CompoundScenarios";
 import ImpactCascade from "@/pages/ImpactCascade";
 import ChatDrawer from "@/components/ChatDrawer";
@@ -48,20 +49,29 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
     ),
   },
   {
-    to: "/backtest",
-    label: "Backtest",
+    to: "/sourcing",
+    label: "Sourcing",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m0 0l-8-4m8 4v10l-8-4m8 4l8-4m-8 4l-8 4" />
       </svg>
     ),
   },
   {
-    to: "/baselines",
-    label: "Baseline",
+    to: "/spr",
+    label: "SPR",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: "/cost",
+    label: "Cost",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
   },
@@ -75,48 +85,88 @@ const SIDEBAR_ITEMS: SidebarItem[] = [
     ),
   },
   {
-    to: "/sourcing",
-    label: "Sourcing",
+    to: "/backtest",
+    label: "Backtest",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m0 0l-8-4m8 4v10l-8-4m8 4l8-4m-8 4l-8 4" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
   },
   {
-    to: "/spr",
-    label: "Reports",
+    to: "/baselines",
+    label: "Baselines",
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
       </svg>
     ),
   },
 ];
 
 function IconSidebar() {
+  const [isExpanded, setIsExpanded] = useState(true);
+
   return (
-    <aside className="w-16 shrink-0 border-r border-slate-200 bg-white flex flex-col items-center py-4 gap-4">
-      {SIDEBAR_ITEMS.map((item) => (
-        <NavLink
-          key={item.label}
-          to={item.to}
-          className={({ isActive }) =>
-            clsx(
-              "relative flex items-center justify-center w-12 h-12 rounded-xl transition-all duration-150 group",
-              isActive
-                ? "bg-blue-50 text-blue-600 font-semibold"
-                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50",
-            )
-          }
-          title={item.label}
+    <aside
+      className={clsx(
+        "shrink-0 border-r border-slate-200 bg-white flex flex-col py-4 justify-between transition-all duration-300",
+        isExpanded ? "w-16 md:w-56" : "w-16"
+      )}
+    >
+      <div className="flex flex-col gap-2">
+        {SIDEBAR_ITEMS.map((item) => (
+          <NavLink
+            key={item.label}
+            to={item.to}
+            className={({ isActive }) =>
+              clsx(
+                "relative flex items-center rounded-xl transition-all duration-150 group mx-2 h-12",
+                isExpanded ? "justify-center md:justify-start md:px-3 gap-3" : "justify-center",
+                isActive
+                  ? "bg-blue-50 text-blue-600 font-semibold"
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-50",
+              )
+            }
+            title={isExpanded ? undefined : item.label}
+          >
+            <div className="shrink-0 flex items-center justify-center w-6 h-6">
+              {item.icon}
+            </div>
+            <span
+              className={clsx(
+                "text-sm font-medium transition-all duration-150",
+                isExpanded ? "hidden md:inline-block" : "hidden"
+              )}
+            >
+              {item.label}
+            </span>
+
+            {/* Tooltip only when collapsed or on mobile */}
+            <span
+              className={clsx(
+                "absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap",
+                isExpanded && "md:hidden"
+              )}
+            >
+              {item.label}
+            </span>
+          </NavLink>
+        ))}
+      </div>
+
+      {/* Toggle button at the bottom */}
+      <div className="hidden md:flex justify-center px-4 mt-auto border-t border-slate-100 pt-4">
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center justify-center w-full h-10 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+          title={isExpanded ? "Collapse Sidebar" : "Expand Sidebar"}
         >
-          {item.icon}
-          <span className="absolute left-14 scale-0 group-hover:scale-100 transition-all duration-150 origin-left bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-md z-50 whitespace-nowrap">
-            {item.label}
+          <span className="font-mono text-sm tracking-tighter">
+            {isExpanded ? "<<" : ">>"}
           </span>
-        </NavLink>
-      ))}
+        </button>
+      </div>
     </aside>
   );
 }
@@ -129,11 +179,6 @@ interface TopTab {
 }
 
 const TOP_TABS: TopTab[] = [
-  {
-    label: "Dashboard",
-    to: "/",
-    matcher: (path) => path === "/",
-  },
   {
     label: "Scenario",
     to: "/scenarios",
@@ -293,6 +338,7 @@ export default function App() {
               <Route path="/stress-test" element={<StressTest />} />
               <Route path="/backtest" element={<Backtest />} />
               <Route path="/sourcing" element={<Sourcing />} />
+              <Route path="/cost" element={<CostOfInaction />} />
               <Route path="/spr" element={<SPR />} />
               <Route path="/baselines" element={<Baselines />} />
             </Routes>
