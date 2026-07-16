@@ -155,15 +155,15 @@ export default function SPR() {
 
       {/* Parameters Panel Container */}
       <div className="card p-5 bg-slate-50/50 flex flex-col gap-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Disruption</label>
+            <label className="text-[9px] font-bold uppercase tracking-wider text-white">Disruption Scenario</label>
             <select
               value={form.scenarioId}
               onChange={(e) => setForm({ ...form, scenarioId: e.target.value })}
               className="input-op w-full font-medium"
             >
-              <option value="">SPR Optimization Agent</option>
+              <option value="">Generic crude shortfall</option>
               {scenarios.map((s) => (
                 <option key={s.name} value={s.name}>
                   {s.label}
@@ -172,23 +172,13 @@ export default function SPR() {
             </select>
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Scenario</label>
-            <select
-              value={form.targetCoverDays}
-              onChange={(e) => setForm({ ...form, targetCoverDays: Number(e.target.value) })}
-              className="input-op w-full font-medium"
-            >
-              <option value="6">New policy policy</option>
-              <option value="4">Emergency minimum</option>
-              <option value="8">Full resilience hold</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Duration - {form.intensity.toFixed(1)}</label>
+            <label className="text-[9px] font-bold uppercase tracking-wider text-white">
+              Intensity {(form.intensity * 100).toFixed(0)}%
+            </label>
             <div className="flex items-center h-[38px]">
               <input
                 type="range"
-                min={0.1}
+                min={0}
                 max={1}
                 step={0.05}
                 value={form.intensity}
@@ -198,39 +188,38 @@ export default function SPR() {
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Release Mode</label>
-            <select
-              value={form.releaseMode}
-              onChange={(e) => setForm({ ...form, releaseMode: e.target.value as FormState['releaseMode'] })}
+            <label className="text-[9px] font-bold uppercase tracking-wider text-white">Target Cover (Days)</label>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={form.targetCoverDays}
+              onChange={(e) => setForm({ ...form, targetCoverDays: Number(e.target.value) })}
               className="input-op w-full font-medium"
-            >
-              <option value="drawdown">Release Mode</option>
-              <option value="swap">Swap (loan vs future)</option>
-              <option value="exchange">Exchange (delayed)</option>
-            </select>
+            />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Target Flow</label>
-            <select
-              value={form.horizonDays}
-              onChange={(e) => setForm({ ...form, horizonDays: Number(e.target.value) })}
-              className="input-op w-full font-medium font-mono"
-            >
-              <option value="60">North Sose</option>
-              <option value="30">South Sose</option>
-              <option value="90">Extended solve</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Market Bias</label>
+            <label className="text-[9px] font-bold uppercase tracking-wider text-white">Market Bias</label>
             <select
               value={form.marketBias}
               onChange={(e) => setForm({ ...form, marketBias: e.target.value as FormState['marketBias'] })}
               className="input-op w-full font-medium"
             >
-              <option value="balanced">Drawdown (Post Bias)</option>
+              <option value="balanced">Balanced</option>
               <option value="north">North India Bias</option>
               <option value="south">South India Bias</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[9px] font-bold uppercase tracking-wider text-white">Release Mode</label>
+            <select
+              value={form.releaseMode}
+              onChange={(e) => setForm({ ...form, releaseMode: e.target.value as FormState['releaseMode'] })}
+              className="input-op w-full font-medium"
+            >
+              <option value="drawdown">Drawdown (spot sale)</option>
+              <option value="swap">Swap (loan vs future)</option>
+              <option value="exchange">Exchange (delayed)</option>
             </select>
           </div>
         </div>
