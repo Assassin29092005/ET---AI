@@ -254,7 +254,7 @@ function TopBar() {
                 key={tab.label}
                 to={tab.to}
                 className={clsx(
-                  "px-4 h-13 flex items-center text-[13px] font-medium border-b-2 transition-all duration-150",
+                  "px-4 h-13 flex items-center text-[13px] font-medium border-b-2 transition-all duration-150 whitespace-nowrap",
                   isActive
                     ? "border-blue-600 text-blue-600"
                     : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-200"

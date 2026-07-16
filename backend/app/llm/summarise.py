@@ -49,8 +49,8 @@ logger = logging.getLogger(__name__)
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "data" / "fixtures" / "llm_responses.json"
 _CACHE_MAXSIZE = 64
-_DEFAULT_MAX_TOKENS = 2048
-_BRIEF_MAX_TOKENS = 4096
+_DEFAULT_MAX_TOKENS = 4096
+_BRIEF_MAX_TOKENS = 8192
 
 
 @lru_cache(maxsize=1)
