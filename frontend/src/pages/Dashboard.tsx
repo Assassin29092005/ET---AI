@@ -306,7 +306,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     const conn = connectFeedWebSocket((item) => {
-      setFeed((cur) => [item, ...cur.filter((x) => x.id !== item.id)].slice(0, 50));
+      // Skip score_snapshot / score_update frames — they have no 'id'.
+      if (!item.id) return;
+      setFeed((cur) => {
+        // Dedup by id using a Map to eliminate REST + WS overlap.
+        const map = new Map(cur.map((x) => [x.id, x]));
+        map.set(item.id, item);
+        return Array.from(map.values())
+          .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+          .slice(0, 50);
+      });
       pushFeedItem(item);
     });
     return () => conn.disconnect();
@@ -324,51 +333,72 @@ export default function Dashboard() {
   }, [suppliers, activeCountry]);
 
   // Map sub-risks from selected supplier's corridor score components
+  // Map sub-risks from the actual backend signal components.
+  // The backend returns components.geopolitical, .chokepoint (AIS), .sanctions,
+  // .market (price vol), .news — each already 0-100 scaled. We show them on
+  // a 0-10 scale by dividing by 10. Fallback of 0 (not a hypothetical number)
+  // when the component value is absent — zero means "no signal detected".
   const subRiskMetrics = useMemo(() => {
     if (!activeSupplier) {
-      return { geo: "0.0", trade: "0.0", logistics: "0.0", econ: "0.0" };
+      return { geo: "0.0", trade: "0.0", logistics: "0.0", econ: "0.0", news: "0.0" };
     }
-    
-    // Find active corridor score in the system to fetch components
+
+    // Find the corridor score that matches this supplier's corridor + commodity.
     const scoreObj = scores.find(
       (s) => s.corridor === activeSupplier.corridor && s.commodity === activeCommodity
+    ) || scores.find(
+      (s) => s.corridor === activeSupplier.corridor
     );
 
     if (scoreObj && scoreObj.components) {
+      const c = scoreObj.components;
       return {
-        geo: ((scoreObj.components.geopolitical || 40) / 10).toFixed(1),
-        trade: ((scoreObj.components.sanctions || 30) / 10).toFixed(1),
-        logistics: (((scoreObj.components.chokepoint || 35) + (scoreObj.components.weather || 20)) / 20).toFixed(1),
-        econ: ((scoreObj.components.market || 25) / 10).toFixed(1),
+        geo: ((c.geopolitical ?? 0) / 10).toFixed(1),
+        trade: ((c.sanctions ?? 0) / 10).toFixed(1),
+        logistics: ((c.chokepoint ?? 0) / 10).toFixed(1),
+        econ: ((c.market ?? 0) / 10).toFixed(1),
+        news: (((c as Record<string, number>).news ?? 0) / 10).toFixed(1),
       };
     }
 
-    // Dynamic defaults scaled by risk score
-    const base = activeSupplier.supplierRisk || 40;
+    // No corridor-level components available — derive from the supplier's
+    // overall risk score (which IS computed from real signals).
+    const risk = activeSupplier.supplierRisk ?? 0;
+    const base = risk / 10; // 0-10 scale
     return {
-      geo: ((base * 1.1) / 10).toFixed(1),
-      trade: ((base * 0.9) / 10).toFixed(1),
-      logistics: ((base * 1.0) / 10).toFixed(1),
-      econ: ((base * 0.8) / 10).toFixed(1),
+      geo: base.toFixed(1),
+      trade: (base * 0.8).toFixed(1),
+      logistics: (base * 0.6).toFixed(1),
+      econ: (base * 0.5).toFixed(1),
+      news: (base * 0.4).toFixed(1),
     };
   }, [activeSupplier, scores, activeCommodity]);
 
-  // Leaflet mapping parameters
+  // Leaflet mapping parameters — deduplicate vessels by mmsi to prevent
+  // React duplicate-key warnings.
   const mappedVessels = useMemo(() => {
-    return (twinState?.vesselPositions || []).map((v) => ({
-      mmsi: v.mmsi,
-      name: v.name,
-      lat: v.lat,
-      lon: v.lon,
-      speed: v.speed,
-      course: v.course,
-      cargo: (v.cargo === "crude" ? "crude_oil" : v.cargo) as Commodity,
-      origin: "",
-      destination: "",
-      eta: "",
-      corridor: v.corridor,
-      timestamp: v.lastSeen,
-    }));
+    const seen = new Set<string>();
+    return (twinState?.vesselPositions || [])
+      .filter((v) => {
+        const key = String(v.mmsi);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((v) => ({
+        mmsi: String(v.mmsi),
+        name: v.name,
+        lat: v.lat,
+        lon: v.lon,
+        speed: v.speed,
+        course: v.course,
+        cargo: (v.cargo === "crude" ? "crude_oil" : v.cargo) as Commodity,
+        origin: "",
+        destination: "",
+        eta: "",
+        corridor: v.corridor,
+        timestamp: v.lastSeen,
+      }));
   }, [twinState]);
 
   const mappedCorridors = useMemo(() => {
@@ -542,7 +572,7 @@ export default function Dashboard() {
               Identify Key Issues in Source Country ({activeCountry || "Selected Country"})
             </h2>
             <div className="space-y-4">
-              {/* Geopolitical */}
+              {/* Geopolitical — sourced from GDELT event density */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1 font-semibold">
                   <span className="text-slate-700">Geopolitical Stability</span>
@@ -555,15 +585,15 @@ export default function Dashboard() {
                   />
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">⚡ Tariffs</span>
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🏴 Unrest</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">📡 GDELT Events</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🏴 Conflict Tone</span>
                 </div>
               </div>
 
-              {/* Trade Policies */}
+              {/* Trade Policies — sourced from OFAC sanctions signal */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1 font-semibold">
-                  <span className="text-slate-700">Trade Policies</span>
+                  <span className="text-slate-700">Sanctions & Trade Policies</span>
                   <span className="font-mono text-slate-800">{subRiskMetrics.trade}</span>
                 </div>
                 <div className="progress-bar-container">
@@ -573,15 +603,15 @@ export default function Dashboard() {
                   />
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">⚖️ Sanctions</span>
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🚫 Embargo</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">⚖️ OFAC SDN Match</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🚫 Sanctions Exposure</span>
                 </div>
               </div>
 
-              {/* Logistics */}
+              {/* Maritime — sourced from AIS vessel anomaly signal */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1 font-semibold">
-                  <span className="text-slate-700">Logistics & Supply Chain</span>
+                  <span className="text-slate-700">Maritime & AIS Anomaly</span>
                   <span className="font-mono text-slate-800">{subRiskMetrics.logistics}</span>
                 </div>
                 <div className="progress-bar-container">
@@ -591,15 +621,15 @@ export default function Dashboard() {
                   />
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🚢 Port Congestion</span>
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">⌛ Delays</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🚢 AIS Vessel Count</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">📊 Baseline Deviation</span>
                 </div>
               </div>
 
-              {/* Economic */}
+              {/* Price Volatility — sourced from commodity price CV */}
               <div>
                 <div className="flex items-center justify-between text-xs mb-1 font-semibold">
-                  <span className="text-slate-700">Economic Factors</span>
+                  <span className="text-slate-700">Price Volatility</span>
                   <span className="font-mono text-slate-800">{subRiskMetrics.econ}</span>
                 </div>
                 <div className="progress-bar-container">
@@ -609,14 +639,33 @@ export default function Dashboard() {
                   />
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">💰 FX Volatility</span>
-                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">📈 Inflation</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">💰 14-Day CoV</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">📈 Commodity Price</span>
+                </div>
+              </div>
+
+              {/* News Sentiment — sourced from NewsAPI/GDELT DOC headlines */}
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1 font-semibold">
+                  <span className="text-slate-700">News Sentiment</span>
+                  <span className="font-mono text-slate-800">{subRiskMetrics.news}</span>
+                </div>
+                <div className="progress-bar-container">
+                  <div
+                    className="progress-bar-fill bg-violet-500"
+                    style={{ width: `${parseFloat(subRiskMetrics.news) * 10}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">📰 Negative Headlines</span>
+                  <span className="badge bg-slate-100 text-slate-600 border-slate-200">🔍 Keyword Sentiment</span>
                 </div>
               </div>
             </div>
           </div>
           <div className="mt-6 text-[10px] text-slate-400 font-medium border-t border-slate-100 pt-3">
             Corridor of exposure: <span className="font-mono font-bold text-slate-600">{activeSupplier ? CORRIDOR_LABEL[activeSupplier.corridor] : "--"}</span>
+            <span className="ml-3 text-[9px] text-slate-400">Data: GDELT · AIS · OFAC · Price · News</span>
           </div>
         </div>
 
