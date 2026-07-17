@@ -424,7 +424,7 @@ export default function Dashboard() {
       {timing && timing.lastE2eMs > 0 && (
         <div className="flex items-center gap-4 rounded-lg border border-slate-700/50 bg-slate-800/60 px-4 py-2 text-[11px] font-mono text-slate-400">
           <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
             <span className="font-semibold text-slate-300">Signal → Recommendation</span>
           </span>
           <span className="border-l border-slate-700 pl-4">
@@ -765,7 +765,7 @@ export default function Dashboard() {
               <h3 className="mt-0.5 text-sm font-bold text-slate-800">Signal → Recommendation Pipeline</h3>
             </div>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
               Agentic
             </span>
           </div>

@@ -140,7 +140,20 @@ def _metric_impact(node_id: str, kind: str, severity: float) -> dict[str, Any] |
     ref = (_SECTOR_METRIC if kind == "sector" else _MACRO_METRIC).get(node_id)
     if not ref:
         return None
+
+    # For FX rate, check if we have a live baseline available
     base = float(ref["base"])
+    if kind == "macro" and node_id == "macro:inr":
+        # Try to get live FX rate from scenarios.BASELINE
+        try:
+            from app.engines import scenarios
+            live_fx = scenarios.BASELINE.get("inr_per_usd")
+            if live_fx is not None:
+                base = float(live_fx)
+        except (ImportError, KeyError, ValueError, TypeError):
+            # Fall back to hardcoded base if live value unavailable
+            pass
+
     mtype = ref["type"]
 
     if mtype == "mult":

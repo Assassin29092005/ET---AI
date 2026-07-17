@@ -1,24 +1,33 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import clsx from "clsx";
-import Dashboard from "@/pages/Dashboard";
-import DigitalTwin from "@/pages/DigitalTwin";
-import ScenarioRun from "@/pages/ScenarioRun";
-import Sourcing from "@/pages/Sourcing";
-import SPR from "@/pages/SPR";
-import Scenarios from "@/pages/Scenarios";
-import ScenarioCompare from "@/pages/ScenarioCompare";
-import StressTest from "@/pages/StressTest";
-import Backtest from "@/pages/Backtest";
-import Baselines from "@/pages/Baselines";
-import CompoundScenarios from "@/pages/CompoundScenarios";
-import ImpactCascade from "@/pages/ImpactCascade";
 import ChatDrawer from "@/components/ChatDrawer";
 import CommodityTicker from "@/components/CommodityTicker";
 import { useAppStore } from "@/lib/store";
 import { getCommodities, getHealthz } from "@/lib/api";
 import { fmtIstClock } from "@/lib/fmt";
 import type { CommodityPrice } from "@/lib/types";
+
+const Dashboard = lazy(() => import("@/pages/Dashboard"));
+const DigitalTwin = lazy(() => import("@/pages/DigitalTwin"));
+const ImpactCascade = lazy(() => import("@/pages/ImpactCascade"));
+const Scenarios = lazy(() => import("@/pages/Scenarios"));
+const ScenarioRun = lazy(() => import("@/pages/ScenarioRun"));
+const ScenarioCompare = lazy(() => import("@/pages/ScenarioCompare"));
+const CompoundScenarios = lazy(() => import("@/pages/CompoundScenarios"));
+const StressTest = lazy(() => import("@/pages/StressTest"));
+const Backtest = lazy(() => import("@/pages/Backtest"));
+const Sourcing = lazy(() => import("@/pages/Sourcing"));
+const SPR = lazy(() => import("@/pages/SPR"));
+const Baselines = lazy(() => import("@/pages/Baselines"));
+
+function PageFallback() {
+  return (
+    <div className="flex h-full min-h-52 items-center justify-center rounded-xl bg-white text-sm text-slate-500">
+      Loading workspace…
+    </div>
+  );
+}
 
 // Helper hook for the current clock
 function useIstClock() {
@@ -239,7 +248,7 @@ function TopBar() {
           <span
             className={clsx(
               "inline-block h-1.5 w-1.5 rounded-full",
-              ok === null ? "bg-slate-300 animate-pulse" : ok ? "bg-emerald-500" : "bg-red-500"
+              ok === null ? "bg-slate-300" : ok ? "bg-emerald-500" : "bg-red-500"
             )}
           />
           <span className="font-mono text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
@@ -282,20 +291,22 @@ export default function App() {
         {/* Navy page frame wrapper */}
         <div className="flex-1 flex flex-col min-w-0 bg-[#0E1B30] overflow-hidden p-6">
           <main className="flex-1 overflow-auto rounded-xl">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/twin" element={<DigitalTwin />} />
-              <Route path="/cascade" element={<ImpactCascade />} />
-              <Route path="/scenarios" element={<Scenarios />} />
-              <Route path="/scenarios/:name" element={<ScenarioRun />} />
-              <Route path="/compare" element={<ScenarioCompare />} />
-              <Route path="/compound" element={<CompoundScenarios />} />
-              <Route path="/stress-test" element={<StressTest />} />
-              <Route path="/backtest" element={<Backtest />} />
-              <Route path="/sourcing" element={<Sourcing />} />
-              <Route path="/spr" element={<SPR />} />
-              <Route path="/baselines" element={<Baselines />} />
-            </Routes>
+            <Suspense fallback={<PageFallback />}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/twin" element={<DigitalTwin />} />
+                <Route path="/cascade" element={<ImpactCascade />} />
+                <Route path="/scenarios" element={<Scenarios />} />
+                <Route path="/scenarios/:name" element={<ScenarioRun />} />
+                <Route path="/compare" element={<ScenarioCompare />} />
+                <Route path="/compound" element={<CompoundScenarios />} />
+                <Route path="/stress-test" element={<StressTest />} />
+                <Route path="/backtest" element={<Backtest />} />
+                <Route path="/sourcing" element={<Sourcing />} />
+                <Route path="/spr" element={<SPR />} />
+                <Route path="/baselines" element={<Baselines />} />
+              </Routes>
+            </Suspense>
           </main>
         </div>
       </div>
