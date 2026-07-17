@@ -2755,36 +2755,110 @@ async def feed(limit: int = Query(default=50)) -> list[dict]:
 
 
 @router.get("/executive-brief")
-async def executive_brief() -> dict:
-    fixture = _load_fixture("llm_responses.json") or {}
-    body = fixture.get("executive_brief") or (
-        "Today's snapshot: Hormuz risk elevated on US-Iran tension signals and a 4% Brent move overnight. "
-        "Red Sea remains effectively closed to LNG and crude majors after this week's Houthi statements. "
-        "South China Sea risk elevated on China rare-earth export licensing tightening. SPR cover stands at 9.5 days; "
-        "scenario simulator shows a 5.1-day runway under a 14-day Hormuz partial closure."
+async def executive_brief(scenario: str | None = Query(default=None)) -> dict:
+    from app import scheduler
+    from app.engines.live_scores import CORRIDOR_PRIMARY_COMMODITY
+    from app.engines.scenarios import BASELINE
+    
+    snap = scheduler.last_snapshot()
+    if not snap:
+        snap = {}
+        
+    sorted_corridors = sorted(
+        snap.items(),
+        key=lambda kv: float(kv[1].get("score", 0.0)),
+        reverse=True
     )
+    
+    top_risks = []
+    for c_id, c_data in sorted_corridors:
+        signals = c_data.get("signals", {})
+        top_signal = max(signals.items(), key=lambda kv: float(kv[1]))[0] if signals else "geo"
+        
+        note_map = {
+            "geo": "GDELT event density",
+            "ais": "AIS anomaly",
+            "sanctions": "OFAC exposure",
+            "price_vol": "Price volatility",
+            "news": "News sentiment"
+        }
+        note = note_map.get(top_signal, top_signal)
+        tier = c_data.get("tier", "low")
+        if tier != "low":
+            top_risks.append({
+                "corridor": c_id,
+                "commodity": CORRIDOR_PRIMARY_COMMODITY.get(c_id, "crude_oil"),
+                "tier": tier,
+                "note": note
+            })
+            
+    # Add fallbacks if we didn't find any elevated/high/critical
+    if not top_risks and sorted_corridors:
+        for c_id, c_data in sorted_corridors[:2]:
+            top_risks.append({
+                "corridor": c_id,
+                "commodity": CORRIDOR_PRIMARY_COMMODITY.get(c_id, "crude_oil"),
+                "tier": "low",
+                "note": "Baseline operations"
+            })
+            
+    if top_risks:
+        h1 = top_risks[0]
+        h2 = top_risks[1] if len(top_risks) > 1 else None
+        
+        def _fmt(s: str) -> str:
+            return s.replace("_", " ").title()
+            
+        headline = f"{_fmt(h1['corridor'])} risk {h1['tier']}"
+        if h2 and h2['tier'] in ("elevated", "high", "critical"):
+            headline += f"; {_fmt(h2['corridor'])} {h2['tier']}"
+    else:
+        headline = "All corridors stable at baseline risk"
+
+    fixture = _load_fixture("llm_responses.json") or {}
+    
+    # Prioritize the scenario response if one is requested, otherwise dynamically generate
+    if scenario and f"scenario_{scenario}" in fixture:
+        body = fixture[f"scenario_{scenario}"]
+    elif "executive_brief" in fixture and not snap:
+        body = fixture["executive_brief"]
+    else:
+        body = f"Today's live snapshot: {headline}. "
+        if top_risks and top_risks[0]["tier"] in ("high", "critical"):
+            c1 = top_risks[0]["commodity"].replace("_", " ")
+            r1 = top_risks[0]["corridor"].replace("_", " ")
+            body += f"Primary exposure in {c1} via {r1} driven by {top_risks[0]['note']}. "
+        
+        brent = BASELINE.get("brent_usd_bbl", BASE_BRENT)
+        spr = BASELINE.get("spr_days_cover_at_baseline", BASE_SPR_DAYS)
+        body += f"Brent baseline is ${brent:.2f}. SPR cover stands at {spr} days. "
+        body += "Recommend monitoring of live signal deviations and maintaining readiness for supply-chain substitution."
+
+    actions = []
+    if top_risks and top_risks[0]["tier"] in ("high", "critical"):
+        r1 = top_risks[0]["corridor"].replace("_", " ").title()
+        actions.append(f"Elevate monitoring for {r1} routes.")
+        if top_risks[0]["commodity"] == "crude_oil":
+            actions.append("Evaluate short-cycle SPR drawdown readiness.")
+        elif top_risks[0]["commodity"] == "lng":
+            actions.append("Confirm spot LNG availability ex-US Gulf.")
+    else:
+        actions.append("Maintain standard strategic reserves.")
+    actions.append("Review supply chain diversification for top exposures.")
+    actions.append("Update financial hedges against FX/commodity volatility.")
+    
     return {
         "generatedAt": _now_iso(),
         "asOfDate": date.today().isoformat(),
-        "headline": "Hormuz elevated; Red Sea suspended; SCS rare-earth tightening",
+        "headline": headline,
         "summary": body,
-        "topRisks": [
-            {"corridor": "hormuz", "commodity": "crude_oil", "tier": "high", "note": "GDELT + AIS anomaly"},
-            {"corridor": "south_china_sea", "commodity": "rare_earths", "tier": "high", "note": "Export licensing"},
-            {"corridor": "bab_el_mandeb", "commodity": "lng", "tier": "elevated", "note": "Houthi statements"},
-            {"corridor": "malacca", "commodity": "coking_coal", "tier": "elevated", "note": "Queensland weather"},
-        ],
-        "actions": [
-            "Trigger short-cycle SPR drawdown (0.85 MB/day, day 0-14).",
-            "Open dialogue with US WTI suppliers for 2 cargoes Aug-Sep.",
-            "Re-route Qatari LNG via Cape window; confirm Dahej slot availability.",
-            "Coordinate with NPCIL on uranium contingency contracting.",
-        ],
+        "topRisks": top_risks[:4],
+        "actions": actions,
         "marketSnapshot": {
-            "brentUsd": BASE_BRENT,
-            "ttfEurMwh": 38.2,
-            "inrUsd": 84.7,
-            "coalAud": 295.4,
+            "brentUsd": BASELINE.get("brent_usd_bbl", BASE_BRENT),
+            "ttfEurMwh": BASELINE.get("ttf_eur_mwh", 34.0),
+            "inrUsd": BASELINE.get("inr_per_usd", 83.5),
+            "coalAud": BASELINE.get("coking_coal_usd_t", 235.0),
         },
         "citations": [
             {"label": "GDELT", "url": "https://www.gdeltproject.org"},
