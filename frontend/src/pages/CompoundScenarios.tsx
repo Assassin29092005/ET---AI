@@ -118,7 +118,7 @@ export default function CompoundScenarios() {
           <button
             type="button"
             onClick={addRow}
-            disabled={picks.length >= 4 || catalogue.length === 0}
+            disabled={picks.length >= 4 || catalogue.length === 0 || picks.length >= catalogue.length}
             className="btn-ghost text-xs bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-600 font-bold px-3 py-1.5 rounded-lg"
           >
             + Add Scenario
@@ -140,11 +140,16 @@ export default function CompoundScenarios() {
                   {catalogue.length === 0 && (
                     <option value={p.scenarioId}>{p.scenarioId}</option>
                   )}
-                  {catalogue.map((c) => (
-                    <option key={metaName(c)} value={metaName(c)}>
-                      {metaLabel(c) || metaName(c)}
-                    </option>
-                  ))}
+                  {(() => {
+                    const used = new Set(picks.map((x) => x.scenarioId));
+                    return catalogue
+                      .filter((c) => metaName(c) === p.scenarioId || !used.has(metaName(c)))
+                      .map((c) => (
+                        <option key={metaName(c)} value={metaName(c)}>
+                          {metaLabel(c) || metaName(c)}
+                        </option>
+                      ));
+                  })()}
                 </select>
               </label>
               <label className="flex flex-col gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
